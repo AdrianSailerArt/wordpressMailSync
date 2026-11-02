@@ -1,10 +1,13 @@
 /** Konfiguration aus Umgebungsvariablen (Bun lädt .env automatisch). */
 
+const missing: string[] = [];
+
 function env(name: string, fallback?: string): string {
   const value = process.env[name]?.trim();
   if (value) return value;
   if (fallback !== undefined) return fallback;
-  throw new Error(`Fehlende Konfiguration: ${name} (siehe .env.example)`);
+  missing.push(name);
+  return "";
 }
 
 const bool = (name: string, fallback: boolean) =>
@@ -13,7 +16,9 @@ const bool = (name: string, fallback: boolean) =>
 export type SeoPlugin = "yoast" | "rankmath" | "none";
 
 export function loadConfig() {
-  return {
+  missing.length = 0;
+  env("ANTHROPIC_API_KEY"); // liest das SDK selbst, hier nur auf Vorhandensein prüfen
+  const config = {
     imap: {
       host: env("IMAP_HOST"),
       port: Number(env("IMAP_PORT", "993")),
@@ -50,6 +55,16 @@ export function loadConfig() {
       dbPath: env("DB_PATH", "data/pressbot.sqlite"),
     },
   };
+
+  if (missing.length) {
+    console.error(
+      `\nEs fehlen Einstellungen: ${missing.join(", ")}\n\n` +
+        "→ .env.example nach .env kopieren und ausfüllen:  cp .env.example .env\n" +
+        "→ oder ohne Zugangsdaten ausprobieren:          DEMO=1 bun run start\n",
+    );
+    process.exit(1);
+  }
+  return config;
 }
 
 export type Config = ReturnType<typeof loadConfig>;

@@ -74,5 +74,5 @@ export const DEMO_ENV: Record<string, string> = {
   IMAP_HOST: "demo", IMAP_USER: "demo", IMAP_PASSWORD: "demo",
   WP_URL: "https://example.com", WP_USER: "demo", WP_APP_PASSWORD: "demo",
   WP_CATEGORIES: "News,Tourdaten,Releases,Festivals", SITE_NAME: "Demo-Musikblog",
-  DB_PATH: ":memory:",
+  DB_PATH: ":memory:", ANTHROPIC_API_KEY: "demo",
 };
