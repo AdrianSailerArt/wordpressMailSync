@@ -14,7 +14,7 @@ const job = new Cron(cfg.limits.schedule, { timezone: cfg.limits.timezone, prote
     const result = await pipeline.run();
     console.log(`[Zeitplan] ${result.message}`);
   } catch (err) {
-    console.error("[Zeitplan] Fehler:", err);
+    console.error(`[Zeitplan] Fehler: ${message(err)}`);
   }
 });
 
@@ -24,9 +24,11 @@ if (cfg.server.password) {
   app.use("*", basicAuth({ username: "admin", password: cfg.server.password }));
 }
 
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 app.onError((err, c) => {
-  console.error(err);
-  return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  console.error(`[${c.req.method} ${c.req.path}] ${message(err)}`);
+  return c.json({ error: message(err) }, 500);
 });
 
 const api = new Hono()

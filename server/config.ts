@@ -56,7 +56,7 @@ export function loadConfig() {
     },
     server: {
       host: env("HOST", "127.0.0.1"),
-      port: Number(env("PORT", "3000")),
+      port: Number(env("PORT", "3210")),
       password: env("DASHBOARD_PASSWORD", ""),
       dbPath: env("DB_PATH", "data/pressbot.sqlite"),
     },

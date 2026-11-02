@@ -57,7 +57,7 @@ ein verpasster Lauf wird nicht nachgeholt – dann einfach im Dashboard „Jetzt
 bun install
 cp .env.example .env      # IMAP- und WordPress-Zugang eintragen
 bun run build             # Vue-Dashboard bauen
-bun run start             # Server + Zeitplan → http://127.0.0.1:3000
+bun run start             # Server + Zeitplan → http://127.0.0.1:3210
 ```
 
 Ohne Zugangsdaten ausprobieren (Beispiel-Mails, simuliertes WordPress): `DEMO=1 bun run start`

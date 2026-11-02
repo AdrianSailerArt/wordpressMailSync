@@ -42,4 +42,4 @@ EOF
 
 launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-echo "Autostart eingerichtet – Dashboard: http://127.0.0.1:3000"
+echo "Autostart eingerichtet – Dashboard: http://127.0.0.1:3210"
