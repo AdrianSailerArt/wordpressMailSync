@@ -1,0 +1,26 @@
+/** Verdrahtung der Abhängigkeiten – gemeinsam für Server und CLI. */
+
+import { loadConfig } from "./config.ts";
+import { Store } from "./db.ts";
+import { DEMO_ENV, demoDeps } from "./demo.ts";
+import { Mailbox } from "./mail.ts";
+import { Pipeline } from "./pipeline.ts";
+import { Rewriter } from "./rewrite.ts";
+import { WordPress } from "./wordpress.ts";
+
+export function createApp() {
+  const demo = process.env.DEMO === "1";
+  if (demo) for (const [k, v] of Object.entries(DEMO_ENV)) process.env[k] ??= v;
+
+  const cfg = loadConfig();
+  const store = new Store(cfg.server.dbPath);
+  const deps = demo
+    ? demoDeps(store)
+    : {
+        mailbox: new Mailbox(cfg.imap),
+        wordpress: new WordPress(cfg.wp, cfg.limits.timezone),
+        rewriter: new Rewriter(cfg.claude, cfg.wp.categories),
+        store,
+      };
+  return { cfg, store, pipeline: new Pipeline(cfg, deps), demo };
+}

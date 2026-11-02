@@ -1,0 +1,99 @@
+:root {
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --surface-2: #f0eee9;
+  --border: #e2dfd8;
+  --text: #1d1b18;
+  --muted: #6b665d;
+  --accent: #c2410c;
+  --accent-text: #ffffff;
+  --ok: #15803d;
+  --warn: #b45309;
+  --err: #b91c1c;
+  --radius: 10px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15140f;
+    --surface: #1e1c17;
+    --surface-2: #29271f;
+    --border: #39362d;
+    --text: #f0ede6;
+    --muted: #a39d90;
+    --accent: #fb923c;
+    --accent-text: #1d1b18;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+}
+
+a { color: var(--accent); }
+
+button {
+  font: inherit;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--surface-2); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+button.danger { color: var(--err); }
+
+input, textarea, select {
+  font: inherit;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+textarea.code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.muted { color: var(--muted); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.badge.ok { color: var(--ok); }
+.badge.warn { color: var(--warn); }
+.badge.err { color: var(--err); }
+
+.error-box {
+  border: 1px solid var(--err);
+  color: var(--err);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
