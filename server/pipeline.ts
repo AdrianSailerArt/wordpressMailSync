@@ -8,7 +8,7 @@ import { cleanArticle, type Article } from "./rewrite.ts";
 /** Schnittstellen statt Klassen, damit die Tests Fakes einsetzen können. */
 export interface Deps {
   mailbox: {
-    candidates(): Promise<PressMail[]>;
+    candidates(done?: Set<string>): Promise<PressMail[]>;
     get(uid: number): Promise<PressMail | null>;
     mark(uid: number, flag: typeof DONE_FLAG | typeof SKIPPED_FLAG): Promise<void>;
   };
@@ -60,6 +60,13 @@ export class Pipeline {
     return next;
   }
 
+  /** Mail als erledigt merken: IMAP-Markierung (falls möglich) und lokale Datenbank. */
+  private async markMail(mail: PressMail, flag: typeof DONE_FLAG | typeof SKIPPED_FLAG) {
+    this.deps.store.markProcessed(mail.messageId, flag === DONE_FLAG ? "done" : "skipped");
+    this.deps.store.deleteDraft(mail.uid);
+    await this.deps.mailbox.mark(mail.uid, flag);
+  }
+
   private log(kind: LogKind, subject = "", detail = "", link = "") {
     this.deps.store.log(kind, subject, detail, link);
   }
@@ -70,7 +77,7 @@ export class Pipeline {
 
   async listMails(): Promise<MailSummary[]> {
     const drafts = this.deps.store.draftUids();
-    return (await this.deps.mailbox.candidates()).map((m) => ({
+    return (await this.deps.mailbox.candidates(this.deps.store.processedIds())).map((m) => ({
       uid: m.uid,
       subject: m.subject,
       sender: m.sender,
@@ -110,8 +117,7 @@ export class Pipeline {
   skip(uid: number): Promise<void> {
     return this.exclusive(async () => {
       const mail = await this.mustGet(uid);
-      await this.deps.mailbox.mark(uid, SKIPPED_FLAG);
-      this.deps.store.deleteDraft(uid);
+      await this.markMail(mail, SKIPPED_FLAG);
       this.log("skipped", mail.subject, "manuell übersprungen");
     });
   }
@@ -119,8 +125,7 @@ export class Pipeline {
   private async publishMail(mail: PressMail, article: Article): Promise<{ id: number; link: string }> {
     const image = this.cfg.wp.featuredImage ? mail.images[0] : undefined;
     const post = await this.deps.wordpress.createPost(article, image);
-    await this.deps.mailbox.mark(mail.uid, DONE_FLAG);
-    this.deps.store.deleteDraft(mail.uid);
+    await this.markMail(mail, DONE_FLAG);
     this.log("published", article.title, mail.subject, post.link);
     return post;
   }
@@ -150,13 +155,13 @@ export class Pipeline {
           return result;
         }
 
-        for (const mail of await this.deps.mailbox.candidates()) {
+        for (const mail of await this.deps.mailbox.candidates(this.deps.store.processedIds())) {
           if (result.published.length + result.previews.length >= remaining) break;
 
           if (!looksRelevant(mail)) {
             result.skipped++;
             if (!dryRun) {
-              await this.deps.mailbox.mark(mail.uid, SKIPPED_FLAG);
+              await this.markMail(mail, SKIPPED_FLAG);
               this.log("skipped", mail.subject, "Vorfilter: keine Musik-Stichworte");
             }
             continue;
@@ -166,8 +171,7 @@ export class Pipeline {
           if (!article.relevant) {
             result.skipped++;
             if (!dryRun) {
-              await this.deps.mailbox.mark(mail.uid, SKIPPED_FLAG);
-              this.deps.store.deleteDraft(mail.uid);
+              await this.markMail(mail, SKIPPED_FLAG);
               this.log("skipped", mail.subject, `nicht relevant: ${article.reason}`);
             }
             continue;
@@ -176,8 +180,7 @@ export class Pipeline {
           if (await this.deps.wordpress.slugExists(article.slug)) {
             result.skipped++;
             if (!dryRun) {
-              await this.deps.mailbox.mark(mail.uid, DONE_FLAG);
-              this.deps.store.deleteDraft(mail.uid);
+              await this.markMail(mail, DONE_FLAG);
               this.log("skipped", mail.subject, `Beitrag existiert bereits (${article.slug})`);
             }
             continue;

@@ -25,6 +25,8 @@ export class Store {
     this.db.run("PRAGMA journal_mode = WAL");
     this.db.run(`CREATE TABLE IF NOT EXISTS drafts (
       uid INTEGER PRIMARY KEY, article TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+    this.db.run(`CREATE TABLE IF NOT EXISTS processed (
+      message_id TEXT PRIMARY KEY, status TEXT NOT NULL, ts TEXT NOT NULL)`);
     this.db.run(`CREATE TABLE IF NOT EXISTS log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, kind TEXT NOT NULL,
       subject TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '')`);
@@ -46,6 +48,16 @@ export class Store {
 
   deleteDraft(uid: number): void {
     this.db.query("DELETE FROM drafts WHERE uid = ?").run(uid);
+  }
+
+  /** Erledigte Mails (veröffentlicht oder übersprungen) – unabhängig von IMAP-Markierungen. */
+  markProcessed(messageId: string, status: "done" | "skipped"): void {
+    this.db.query("INSERT OR REPLACE INTO processed (message_id, status, ts) VALUES (?, ?, ?)")
+      .run(messageId, status, new Date().toISOString());
+  }
+
+  processedIds(): Set<string> {
+    return new Set(this.db.query<{ message_id: string }, []>("SELECT message_id FROM processed").all().map((r) => r.message_id));
   }
 
   log(kind: LogKind, subject = "", detail = "", link = ""): void {

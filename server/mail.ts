@@ -23,6 +23,8 @@ export interface ImageAttachment {
 
 export interface PressMail {
   uid: number;
+  /** Message-ID-Header – bleibt auch beim Verschieben gleich und dient als Schlüssel in der Datenbank */
+  messageId: string;
   subject: string;
   sender: string;
   date: string;
@@ -55,6 +57,7 @@ export async function parseMessage(uid: number, source: Buffer): Promise<PressMa
 
   return {
     uid,
+    messageId: parsed.messageId ?? `uid:${uid}`,
     subject: parsed.subject ?? "",
     sender: parsed.from?.text ?? "",
     date: parsed.date?.toISOString() ?? "",
@@ -85,8 +88,12 @@ export class Mailbox {
     }
   }
 
-  /** Alle noch nicht bearbeiteten Mails der letzten Tage, neueste zuerst. */
-  candidates(): Promise<PressMail[]> {
+  /**
+   * Alle noch nicht bearbeiteten Mails der letzten Tage, neueste zuerst.
+   * `done` enthält die Message-IDs, die laut lokaler Datenbank schon erledigt sind –
+   * nötig, weil nicht jeder Server eigene IMAP-Markierungen speichert.
+   */
+  candidates(done: Set<string> = new Set()): Promise<PressMail[]> {
     return this.withFolder(async (client) => {
       const since = new Date(Date.now() - this.cfg.maxAgeDays * 86_400_000);
       const uids =
@@ -96,9 +103,16 @@ export class Mailbox {
         )) || [];
       if (uids.length === 0) return [];
 
+      // Erst nur die Kopfdaten holen, damit erledigte Mails nicht komplett geladen werden
+      const open: number[] = [];
+      for await (const msg of client.fetch(uids.join(","), { envelope: true, uid: true }, { uid: true })) {
+        if (!done.has(msg.envelope?.messageId ?? `uid:${msg.uid}`)) open.push(msg.uid);
+      }
+      if (open.length === 0) return [];
+
       const mails: PressMail[] = [];
       // fetch() liest per BODY.PEEK – der Gelesen-Status bleibt unverändert
-      for await (const msg of client.fetch(uids.join(","), { source: true, uid: true }, { uid: true })) {
+      for await (const msg of client.fetch(open.join(","), { source: true, uid: true }, { uid: true })) {
         if (msg.source) mails.push(await parseMessage(msg.uid, msg.source));
       }
       return mails.sort((a, b) => b.date.localeCompare(a.date));
@@ -112,9 +126,10 @@ export class Mailbox {
     });
   }
 
+  /** Markierung setzen, soweit der Server das erlaubt; die verlässliche Merkliste ist die lokale Datenbank. */
   mark(uid: number, flag: typeof DONE_FLAG | typeof SKIPPED_FLAG): Promise<void> {
     return this.withFolder(async (client) => {
-      await client.messageFlagsAdd(String(uid), [flag], { uid: true });
+      await client.messageFlagsAdd(String(uid), [flag], { uid: true }).catch(() => false);
       if (flag === DONE_FLAG && this.cfg.processedFolder) {
         await client.messageMove(String(uid), this.cfg.processedFolder, { uid: true });
       }

@@ -11,7 +11,7 @@ const cfg = {
 } as unknown as Config;
 
 const mail = (uid: number, subject: string, body = "…"): PressMail =>
-  ({ uid, subject, sender: "x", date: "", body, images: [] });
+  ({ uid, messageId: `<${uid}@test>`, subject, sender: "x", date: "", body, images: [] });
 
 const MAILS = [
   mail(1, "Ihre Rechnung", "Betrag fällig"),
@@ -31,7 +31,8 @@ function pipeline() {
   rewrites = 0;
   return new Pipeline(cfg, {
     mailbox: {
-      candidates: async () => MAILS,
+      // wie DomainFactory: Server speichert keine Markierungen, nur die lokale Datenbank filtert
+      candidates: async (done = new Set()) => MAILS.filter((m) => !done.has(m.messageId)),
       get: async (uid) => MAILS.find((m) => m.uid === uid) ?? null,
       mark: async (uid, flag) => void marks.push([uid, flag]),
     },
@@ -94,4 +95,14 @@ test("Vorschau wird zwischengespeichert, bearbeiteter Entwurf wird veröffentlic
 test("manuelles Veröffentlichen respektiert das Tageslimit", async () => {
   today = 3;
   expect(pipeline().publish(3)).rejects.toThrow("Tageslimit");
+});
+
+test("ohne IMAP-Markierungen: erledigte Mails kommen nicht wieder", async () => {
+  const p = pipeline();
+  await p.run();
+  await p.run();
+  expect(created).toEqual(["post-3", "post-4"]);
+  const third = await p.run();
+  expect(third.published).toHaveLength(0);
+  expect(await p.listMails()).toHaveLength(0);
 });

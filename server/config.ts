@@ -32,7 +32,7 @@ export function loadConfig() {
       maxAgeDays: Number(env("MAX_AGE_DAYS", "7")),
     },
     wp: {
-      url: env("WP_URL").replace(/\/+$/, ""),
+      url: env("WP_URL").replace(/\/+$/, "").replace(/^(?!https?:\/\/)(?=.)/, "https://"),
       user: env("WP_USER"),
       appPassword: env("WP_APP_PASSWORD"),
       status: env("WP_STATUS", "publish") as "publish" | "draft" | "pending",

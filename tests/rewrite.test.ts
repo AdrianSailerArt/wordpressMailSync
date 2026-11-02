@@ -5,7 +5,7 @@ const cfg = {
   provider: "ollama" as const, ollamaUrl: "http://ollama.test", ollamaModel: "gemma4",
   claudeModel: "", siteName: "Blog", siteTone: "locker",
 };
-const mail = { uid: 1, subject: "Band – Tour 2027", sender: "x", date: "", body: "Tourdaten …", images: [] };
+const mail = { uid: 1, messageId: "<1@test>", subject: "Band – Tour 2027", sender: "x", date: "", body: "Tourdaten …", images: [] };
 const reply = (content: string) => new Response(JSON.stringify({ message: { content } }));
 const article = JSON.stringify({
   relevant: true, reason: "", title: "Band Tour 2027", slug: "Band Tour", focus_keyword: "Band Tour 2027",
