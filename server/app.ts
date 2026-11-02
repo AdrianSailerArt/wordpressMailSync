@@ -19,7 +19,7 @@ export function createApp() {
     : {
         mailbox: new Mailbox(cfg.imap),
         wordpress: new WordPress(cfg.wp, cfg.limits.timezone),
-        rewriter: new Rewriter(cfg.claude, cfg.wp.categories),
+        rewriter: new Rewriter(cfg.llm, cfg.wp.categories),
         store,
       };
   return { cfg, store, pipeline: new Pipeline(cfg, deps), demo };

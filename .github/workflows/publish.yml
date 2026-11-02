@@ -1,24 +1,8 @@
-name: Tests & optionaler Lauf
+name: Tests
 
-# Tests laufen bei jedem Push. Den Veröffentlichungs-Lauf brauchst du hier nur,
-# wenn du KEINEN eigenen Server betreibst: dann die schedule-Zeilen unten einkommentieren
-# und die Secrets aus der README anlegen.
 on:
   push:
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Nur testen (nichts veröffentlichen)"
-        type: boolean
-        default: true
-  # schedule:
-  #   - cron: "0 7 * * *"
-  #   - cron: "0 12 * * *"
-  #   - cron: "0 17 * * *"
-
-concurrency:
-  group: pressbot
-  cancel-in-progress: false
 
 jobs:
   test:
@@ -30,36 +14,3 @@ jobs:
       - run: bun run typecheck
       - run: bun test
       - run: bun run build
-
-  publish:
-    if: github.event_name != 'push'
-    needs: test
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile --production
-      - name: Lauf ausführen
-        run: bun run once ${{ inputs.dry_run && '--dry-run' || '' }}
-        env:
-          IMAP_HOST: ${{ secrets.IMAP_HOST }}
-          IMAP_PORT: ${{ vars.IMAP_PORT || '993' }}
-          IMAP_USER: ${{ secrets.IMAP_USER }}
-          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
-          IMAP_FOLDER: ${{ vars.IMAP_FOLDER || 'INBOX' }}
-          IMAP_PROCESSED_FOLDER: ${{ vars.IMAP_PROCESSED_FOLDER }}
-          WP_URL: ${{ secrets.WP_URL }}
-          WP_USER: ${{ secrets.WP_USER }}
-          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          WP_STATUS: ${{ vars.WP_STATUS || 'publish' }}
-          WP_CATEGORIES: ${{ vars.WP_CATEGORIES || 'News,Tourdaten,Releases,Festivals' }}
-          SEO_PLUGIN: ${{ vars.SEO_PLUGIN || 'none' }}
-          FEATURED_IMAGE: ${{ vars.FEATURED_IMAGE || 'true' }}
-          DAILY_LIMIT: ${{ vars.DAILY_LIMIT || '3' }}
-          POSTS_PER_RUN: ${{ vars.POSTS_PER_RUN || '1' }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-opus-5-5' }}
-          SITE_NAME: ${{ vars.SITE_NAME }}
-          SITE_TONE: ${{ vars.SITE_TONE }}
-          DB_PATH: ":memory:"

@@ -108,7 +108,7 @@ onUnmounted(() => clearInterval(timer));
         <dt>WordPress</dt><dd><a :href="status.config.wpUrl" target="_blank">{{ status.config.wpUrl }}</a> · Status „{{ status.config.wpStatus }}“</dd>
         <dt>IMAP-Ordner</dt><dd>{{ status.config.folder }}</dd>
         <dt>Zeitplan</dt><dd><code>{{ status.schedule }}</code> ({{ status.config.timezone }}), max. {{ status.config.perRun }} pro Lauf, {{ status.limit }} pro Tag</dd>
-        <dt>Claude-Modell</dt><dd>{{ status.config.model }}</dd>
+        <dt>Sprachmodell</dt><dd>{{ status.config.model }}</dd>
         <dt>SEO-Plugin</dt><dd>{{ status.config.seoPlugin }}</dd>
         <dt>Kategorien</dt><dd>{{ status.config.categories.join(", ") }}</dd>
       </dl>

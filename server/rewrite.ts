@@ -25,10 +25,12 @@ persönliche Mails, Gewinnspiel-Spam usw. sind nicht relevant (relevant=false; d
 - Formuliere vollständig neu, kopiere keine Sätze aus der Mail. Zitate von Künstler:innen \
 dürfen als kurzes Zitat übernommen werden, klar gekennzeichnet.
 - Übernimm Fakten exakt: Namen, Daten, Städte, Venues, Ticketpreise, Vorverkaufsstart, \
-Links. Erfinde nichts dazu; was nicht in der Mail steht, lässt du weg.
+Links. Erfinde nichts dazu – auch keine Vermutungen über Setlist, Stimmung oder \
+Nachfrage; was nicht in der Mail steht, lässt du weg. Relative Zeitangaben („ab Freitag“, \
+„nächste Woche“) übernimmst du wörtlich und rechnest sie nie in ein Datum um.
 - SEO: Fokus-Keyword (meist „Künstler + Tour/Album + Jahr“) im Titel, im ersten Absatz \
 und in einer Zwischenüberschrift. Titel max. 60 Zeichen, Meta-Description 120–155 \
-Zeichen mit Handlungsaufforderung, sprechender Slug (Kleinbuchstaben, Bindestriche, \
+Zeichen (zähle nach – lieber kürzer als länger) mit Handlungsaufforderung, sprechender Slug (Kleinbuchstaben, Bindestriche, \
 keine Umlaute).
 - Aufbau content_html: Einleitender Absatz (Wer, Was, Wann), dann 2–4 Abschnitte mit \
 <h2>, Tourdaten als <ul> mit „Datum – Stadt – Venue“, ein Abschnitt zu Tickets falls \
@@ -100,11 +102,53 @@ export function cleanArticle(article: Article, categories: string[]): Article {
   };
 }
 
+/** Rohes JSON vom Sprachmodell holen – lokal über Ollama oder über die Claude-API. */
+async function generateOllama(cfg: Config["llm"], system: string, user: string): Promise<string> {
+  const res = await fetch(`${cfg.ollamaUrl}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: cfg.ollamaModel,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      format: JSON_SCHEMA, // erzwingt gültiges JSON nach Schema
+      stream: false,
+      think: false,
+      keep_alive: "10m",
+      options: { temperature: 0.4, num_ctx: 16384 },
+    }),
+    signal: AbortSignal.timeout(10 * 60_000),
+  }).catch((err) => {
+    throw new Error(`Ollama nicht erreichbar unter ${cfg.ollamaUrl} – läuft die Ollama-App? (${err})`);
+  });
+  if (!res.ok) throw new Error(`Ollama: ${res.status} ${(await res.text()).slice(0, 300)}`);
+  const data = (await res.json()) as { message?: { content?: string } };
+  if (!data.message?.content) throw new Error("Leere Antwort von Ollama");
+  return data.message.content;
+}
+
+async function generateClaude(cfg: Config["llm"], system: string, user: string): Promise<string | null> {
+  const client = new Anthropic();
+  const response = await client.beta.messages.create({
+    model: cfg.claudeModel,
+    max_tokens: 16000,
+    system,
+    messages: [{ role: "user", content: user }],
+    output_config: { effort: "medium", format: { type: "json_schema", schema: JSON_SCHEMA } },
+    // Bei einer Ablehnung durch Sicherheitsfilter automatisch auf ein Fallback-Modell ausweichen
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+  });
+  if (response.stop_reason === "refusal") return null;
+  if (response.stop_reason === "max_tokens") throw new Error("Antwort von Claude wurde abgeschnitten (max_tokens)");
+  const text = response.content.find((b) => b.type === "text");
+  if (!text || text.type !== "text") throw new Error("Keine Textantwort von Claude");
+  return text.text;
+}
+
 export class Rewriter {
-  private client = new Anthropic();
   private system: string;
 
-  constructor(private cfg: Config["claude"], private categories: string[]) {
+  constructor(private cfg: Config["llm"], private categories: string[]) {
     this.system = SYSTEM_PROMPT.replace("{siteName}", cfg.siteName)
       .replace("{siteTone}", cfg.siteTone)
       .replace("{categories}", categories.join(", "));
@@ -115,25 +159,20 @@ export class Rewriter {
       `Betreff: ${mail.subject}\nVon: ${mail.sender}\nDatum: ${mail.date}\n` +
       `Anhänge mit Bildern: ${mail.images.length}\n\n<email>\n${mail.body}\n</email>`;
 
-    const response = await this.client.beta.messages.create({
-      model: this.cfg.model,
-      max_tokens: 16000,
-      system: this.system,
-      messages: [{ role: "user", content: user }],
-      output_config: { effort: "medium", format: { type: "json_schema", schema: JSON_SCHEMA } },
-      // Bei einer Ablehnung durch Sicherheitsfilter automatisch auf ein Fallback-Modell ausweichen
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-    });
-
-    if (response.stop_reason === "refusal") {
-      return ArticleSchema.parse({ relevant: false, reason: "Claude hat die Anfrage abgelehnt" });
+    // Lokale Modelle liefern gelegentlich unbrauchbares JSON – dann einmal neu versuchen
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const raw = this.cfg.provider === "claude"
+          ? await generateClaude(this.cfg, this.system, user)
+          : await generateOllama(this.cfg, this.system, user);
+        if (raw === null) return ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt" });
+        return cleanArticle(ArticleSchema.parse(JSON.parse(raw)), this.categories);
+      } catch (err) {
+        lastError = err;
+        if (!(err instanceof SyntaxError || err instanceof z.ZodError)) throw err;
+      }
     }
-    if (response.stop_reason === "max_tokens") {
-      throw new Error("Antwort von Claude wurde abgeschnitten (max_tokens)");
-    }
-    const text = response.content.find((b) => b.type === "text");
-    if (!text || text.type !== "text") throw new Error("Keine Textantwort von Claude");
-    return cleanArticle(ArticleSchema.parse(JSON.parse(text.text)), this.categories);
+    throw new Error(`Ungültige Antwort vom Sprachmodell: ${lastError}`);
   }
 }

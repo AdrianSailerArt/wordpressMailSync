@@ -14,10 +14,13 @@ const bool = (name: string, fallback: boolean) =>
   ["1", "true", "yes", "ja"].includes(env(name, String(fallback)).toLowerCase());
 
 export type SeoPlugin = "yoast" | "rankmath" | "none";
+export type LlmProvider = "ollama" | "claude";
 
 export function loadConfig() {
   missing.length = 0;
-  env("ANTHROPIC_API_KEY"); // liest das SDK selbst, hier nur auf Vorhandensein prüfen
+  const provider = env("LLM_PROVIDER", "ollama").toLowerCase() as LlmProvider;
+  // den Key liest das Anthropic-SDK selbst, hier nur auf Vorhandensein prüfen
+  if (provider === "claude") env("ANTHROPIC_API_KEY");
   const config = {
     imap: {
       host: env("IMAP_HOST"),
@@ -43,8 +46,11 @@ export function loadConfig() {
       timezone: env("TIMEZONE", "Europe/Berlin"),
       schedule: env("SCHEDULE", "0 8,13,18 * * *"),
     },
-    claude: {
-      model: env("CLAUDE_MODEL", "claude-opus-5-5"),
+    llm: {
+      provider,
+      ollamaUrl: env("OLLAMA_URL", "http://127.0.0.1:11434").replace(/\/+$/, ""),
+      ollamaModel: env("OLLAMA_MODEL", "gemma4"),
+      claudeModel: env("CLAUDE_MODEL", "claude-opus-5-5"),
       siteName: env("SITE_NAME", "Musikblog"),
       siteTone: env("SITE_TONE", "locker und kompetent"),
     },

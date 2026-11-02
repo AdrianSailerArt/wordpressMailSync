@@ -39,10 +39,10 @@ const api = new Hono()
       schedule: cfg.limits.schedule,
       nextRun: job.nextRun()?.toISOString() ?? null,
       config: {
-        site: cfg.claude.siteName,
+        site: cfg.llm.siteName,
         wpUrl: cfg.wp.url,
         wpStatus: cfg.wp.status,
-        model: cfg.claude.model,
+        model: cfg.llm.provider === "claude" ? `Claude (${cfg.llm.claudeModel})` : `lokal: ${cfg.llm.ollamaModel} (Ollama)`,
         folder: cfg.imap.folder,
         seoPlugin: cfg.wp.seoPlugin,
         categories: cfg.wp.categories,
