@@ -1,0 +1,53 @@
+name: Pressemitteilungen veröffentlichen
+
+on:
+  schedule:
+    # 3 Läufe pro Tag (UTC) – im Winter 08/13/18 Uhr, im Sommer 09/14/19 Uhr deutscher Zeit
+    - cron: "0 7 * * *"
+    - cron: "0 12 * * *"
+    - cron: "0 17 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Nur testen (nichts veröffentlichen)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: pressbot
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install .
+      - name: pressbot ausführen
+        run: pressbot ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          IMAP_PORT: ${{ vars.IMAP_PORT || '993' }}
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
+          IMAP_FOLDER: ${{ vars.IMAP_FOLDER || 'INBOX' }}
+          IMAP_PROCESSED_FOLDER: ${{ vars.IMAP_PROCESSED_FOLDER }}
+          WP_URL: ${{ secrets.WP_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          WP_STATUS: ${{ vars.WP_STATUS || 'publish' }}
+          WP_CATEGORIES: ${{ vars.WP_CATEGORIES || 'News,Tourdaten,Releases,Festivals' }}
+          SEO_PLUGIN: ${{ vars.SEO_PLUGIN || 'none' }}
+          FEATURED_IMAGE: ${{ vars.FEATURED_IMAGE || 'true' }}
+          DAILY_LIMIT: ${{ vars.DAILY_LIMIT || '3' }}
+          POSTS_PER_RUN: ${{ vars.POSTS_PER_RUN || '1' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-opus-5-5' }}
+          SITE_NAME: ${{ vars.SITE_NAME }}
+          SITE_TONE: ${{ vars.SITE_TONE }}
