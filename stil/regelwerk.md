@@ -35,25 +35,25 @@ Festival-Ankündigungen 2025/2026). Gilt für jeden automatisch erstellten Beitr
 1. Aufhänger + Einordnung der Band (Genre, Herkunft, was sie live ausmacht)
 2. Anlass der Tour (neues Album, Jubiläum, Rückkehr), Support-Bands mit Herkunft und Genre
 3. Zwischenüberschrift „Alle Termine“ bzw. „Tourdaten“ und die Terminliste
-4. Ticket-Zeile mit Link
+4. Ticket-Zeile mit Link – nur wenn die Mail einen echten Link enthält
 
 **Album/Single (+ Tour)** (Kategorie News)
 1. Aufhänger (z. B. Abstand zum letzten Album)
 2. Erscheinungsdatum, Label, Produzent, erste Single/Video
 3. Zitat der Band als eigener Absatz, wenn die Mail eines enthält (gekürzt, max. 3 Sätze)
 4. Tracklist als nummerierte Liste, falls vorhanden
-5. Tourdaten, falls vorhanden; Vorbestell- oder Ticket-Link
+5. Tourdaten, falls vorhanden; Vorbestell- oder Ticket-Link, falls in der Mail
 
 **Festival-Ankündigung / Line-up** (Kategorie Events)
 1. Ort fett + Aufhänger (Jubiläum, Lage, Atmosphäre), Datum fett
 2. Zwischenüberschrift zum Line-up; Headliner jeweils **fett** mit einem Satz zur Einordnung
    (gern als Liste), alle weiteren Acts als kommagetrennte Aufzählung
 3. Besonderheiten (neue Bühne, Camping, Tagestickets, Nachhaltigkeit) – nur wenn in der Mail
-4. Ticket-Zeile mit Link
+4. Ticket-Zeile mit Link – nur wenn die Mail einen echten Link enthält
 
 **Einzelkonzert / Club-Show** (Kategorie News)
 - Kurz halten (150–250 Wörter): Aufhänger, Datum und Location fett, ein Absatz zur Band,
-  danach die Faktenzeilen „**Datum:** …“, „**Location:** …“, „**Tickets:** Link“.
+  danach die Faktenzeilen „**Datum:** …“, „**Location:** …“, „**Tickets:** Link“ (ohne Link: Vorverkaufsinfo als Text oder Zeile weglassen).
 
 ## Titel
 
@@ -83,7 +83,10 @@ Festival-Ankündigungen 2025/2026). Gilt für jeden automatisch erstellten Beitr
 - Englische Monats- und Wochentagsangaben aus der Mail ins deutsche Format übertragen.
   Fehlt das Jahr in der Mail, kein Jahr erfinden.
 - Zusätze wie „ausverkauft“, „Zusatzshow“, „mit Special Guests“ hinter dem Termin übernehmen.
-- Abschluss mit einer Ticket-Zeile: „Infos & Tickets: Link“ (Linktext = Domain oder „Tickets“).
+- Abschluss mit einer Ticket-Zeile: „Infos & Tickets: Link“ (Linktext = Domain oder „Tickets“) –
+  **nur wenn die Mail eine echte URL dafür enthält**. Ohne Ziel ergibt die Zeile keinen Sinn und
+  entfällt ganz. Niemals Platzhalter wie „[Link zu Reaper Entertainment oder offizielle Website]“,
+  „[Website]“ oder „Link folgt“, und keine Links erfinden oder raten.
 - Nur Links verwenden, die in der Mail stehen. Keine Social-Media-Teilen-Links.
 - **Niemals** Links zu Downloads, Presseordnern, Pressebereichen, Pressefotos, Pressekits/EPKs
   oder Hörproben in den Artikel – auch nicht als „Hier reinhören“. Dazu zählen WeTransfer,

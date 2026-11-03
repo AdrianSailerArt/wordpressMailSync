@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ImageStore } from "../server/images.ts";
 import { extractImageLinks, looksRelevant, parseMessage, youtubeId, type PressMail } from "../server/mail.ts";
-import { ArticleSchema, cleanArticle, degender, isBlockedLink, slugify, stripBlockedUrls, stripPressLinks, tidyContent } from "../server/rewrite.ts";
+import { ArticleSchema, cleanArticle, degender, isBlockedLink, keepMailLinks, slugify, stripBlockedUrls, stripPressLinks, tidyContent } from "../server/rewrite.ts";
 import { insertAfterParagraph, videoHtml } from "../server/wordpress.ts";
 
 function rawMail(subject: string, html: string, image?: Buffer): Buffer {
@@ -212,6 +212,22 @@ describe("Links und Videos", () => {
       .toBe(`<p>Mehr unter [https://band.example] und bald live.</p>`);
     expect(stripBlockedUrls(`Stream: Hier hören [${promo}]\nWebsite [https://band.example]`))
       .toBe("Stream: Hier hören \nWebsite [https://band.example]");
+  });
+
+  test("Platzhalter statt Link: Ticket-Zeile ohne Ziel fällt weg", () => {
+    expect(tidyContent(`<p>Das Album erscheint am 20.11.2026.</p><p>Infos &amp; Tickets: [Link zu Reaper Entertainment oder offizielle Website]</p>`))
+      .toBe("<p>Das Album erscheint am 20.11.2026.</p>");
+    expect(tidyContent(`<p><strong>Tickets:</strong> [Ticket-Link]</p><p>Website: <a href="#">hier</a></p><ul><li>Infos: Link folgt</li></ul>`)).toBe("<ul></ul>");
+    expect(tidyContent(`<p>Tickets gibt es ab Freitag über [Link zum Ticketshop].</p>`)).toBe("<p>Tickets gibt es ab Freitag.</p>");
+    // echte Links und normale Absätze bleiben
+    const ok = `<p>Infos &amp; Tickets: <a href="https://reaper-entertainment.de">reaper-entertainment.de</a></p><p>Tickets: ab 32 € im Vorverkauf</p>`;
+    expect(tidyContent(ok)).toBe(ok);
+  });
+
+  test("Links, die nicht in der Mail stehen, verlieren ihren Link", () => {
+    const mail = { body: "Tickets [https://tickets.example/band?x=1&y=2]", html: "" };
+    expect(keepMailLinks(`<p><a href="https://tickets.example/band?x=1&amp;y=2">Tickets</a> und <a href="https://erfunden.example">Website</a></p>`, mail))
+      .toBe(`<p><a href="https://tickets.example/band?x=1&amp;y=2">Tickets</a> und Website</p>`);
   });
 
   test("Video wird cookiefrei eingebunden: eigenes Vorschaubild mit Link, kein Player, keine nackte URL", () => {

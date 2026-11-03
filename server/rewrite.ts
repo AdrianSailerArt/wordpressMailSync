@@ -67,6 +67,8 @@ keine Umlaute).
 <h2>, Tourdaten als <ul> mit „Datum – Stadt – Venue“, ein Abschnitt zu Tickets falls \
 bekannt. Länge je nach Meldung laut Regelwerk, meist 200–450 Wörter. Erlaubte Tags: h2, h3, p, ul, ol, li, strong, em, a, table, \
 blockquote. Keine h1, kein Inline-CSS, keine Bilder.
+- Links nur mit einer echten URL aus der Mail. Gibt es keine, lass die Ticket-/Info-Zeile ganz \
+weg – niemals Platzhalter wie „[Link zu …]“, „[Website]“ oder „Link folgt“.
 - Keine Links zu Downloads, Presseordnern, Pressefotos oder Hörproben (WeTransfer, Dropbox, \
 private SoundCloud-Links usw.) und keine YouTube-Links – Videos bindet die Redaktion selbst ein.
 - Nicht gendern: keine Genderzeichen (: * _ Binnen-I), generisches Maskulinum (Leser, Fans, Musiker).
@@ -213,9 +215,39 @@ export function stripBlockedUrls(text: string): string {
   return text.replace(/\[?(https?:\/\/[^\s<>"'\]]+)\]?/g, (m, url: string) => (isBlockedLink(url) ? "" : m));
 }
 
+const normalizeUrl = (url: string) => url.replace(/&amp;/g, "&").replace(/^https?:\/\/(www\.)?/i, "").replace(/[/#?]+$/, "").toLowerCase();
+
+/** Nur Links behalten, die so in der Mail stehen – erfundene Ziele verlieren ihren Link, der Text bleibt. */
+export function keepMailLinks(html: string, mail: Pick<PressMail, "body" | "html">): string {
+  const source = `${mail.body}\n${mail.html ?? ""}`.replace(/&amp;/g, "&");
+  const known = new Set([...source.matchAll(/https?:\/\/[^\s<>"'\])]+/gi)].map(([u]) => normalizeUrl(u)));
+  return html.replace(/<a\b[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (m, href: string, text: string) =>
+    href.startsWith("mailto:") || known.has(normalizeUrl(href)) ? m : text);
+}
+
+/** „[Link zu Reaper Entertainment oder offizielle Website]“, „[URL]“, „(Link folgt)“ … */
+const PLACEHOLDER = /(?:\s+(?:über|unter|bei|auf|via|hier|im|in der|in))?\s*(?:\[(?!https?:)[^\]<]{0,100}\b(?:link|url|website|webseite|homepage|ticket-?shop|vorverkaufsstelle|offizielle)[^\]<]{0,100}\]|\(link folgt\)|link folgt)/gi;
+/** Absatz, in dem nach dem Entfernen nur noch die Beschriftung steht: „Infos & Tickets:“ */
+const LABEL_ONLY = /^(?:(?:alle\s+)?infos?(?:\s*(?:&|und|\/)\s*)?)?(?:tickets?|website|webseite|homepage|vorverkauf|vorbestellung|vorbestellen|links?|mehr infos?)?\s*[:.–-]*(?:\s*(?:hier|klicken|unter|link|online))*\s*[.!]?\s*$/i;
+
+/**
+ * Platzhalter statt echter Links entfernen. Ohne Ziel ergibt „Infos & Tickets:“ keinen Sinn –
+ * steht in einem Absatz danach nur noch die Beschriftung (ohne Link), fällt er ganz weg.
+ */
+export function stripPlaceholders(html: string): string {
+  return html
+    .replace(PLACEHOLDER, "")
+    .replace(/<a\b[^>]*href=["'](?!https?:|mailto:)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi, "$1") // href="#", "LINK" …
+    .replace(/<(p|li)\b[^>]*>([\s\S]*?)<\/\1>/gi, (block, _tag, inner: string) => {
+      if (/<a\b/i.test(inner)) return block;
+      const text = inner.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim();
+      return text && LABEL_ONLY.test(text) ? "" : block.replace(/\s+([.,;:!?])/g, "$1");
+    });
+}
+
 /** Typische Formfehler im Beitragstext beheben, bevor das HTML gefiltert wird. */
 export function tidyContent(html: string): string {
-  return degenderHtml(stripPressLinks(html))
+  return degenderHtml(stripPlaceholders(stripPressLinks(html)))
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")           // Markdown-Fett → HTML
     .replace(/^\s*<h[23][^>]*>[\s\S]*?<\/h[23]>\s*/i, "")       // Beitrag beginnt mit dem Einstieg, nicht mit einer Überschrift
     .replace(/(^|[^\d.])(\d)\.(\d{2})\.(\d{2,4})(?!\d)/g, "$10$2.$3.$4"); // 1.04.2027 → 01.04.2027
@@ -408,7 +440,7 @@ export class Rewriter {
         const article = await this.ask(mail.uid, "write", model, this.system, user, JSON_SCHEMA, (r) => ArticleSchema.parse(r));
         result = article === null
           ? ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt", generated_by: model })
-          : { ...cleanArticle(article, this.categories), generated_by: model };
+          : { ...cleanArticle({ ...article, content_html: keepMailLinks(article.content_html, mail) }, this.categories), generated_by: model };
       }
       return result;
     } catch (err) {
