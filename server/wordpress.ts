@@ -1,6 +1,7 @@
 /** WordPress-REST-API: Tageslimit prüfen, Beitrag samt Bild, Tags und SEO-Meta anlegen. */
 
 import type { Config } from "./config.ts";
+import type { VideoInfo } from "./images.ts";
 import type { ImageAttachment } from "./mail.ts";
 import { slugify, type Article } from "./rewrite.ts";
 
@@ -99,9 +100,20 @@ export class WordPress {
     return { id, url: source_url };
   }
 
-  async createPost(article: Article, featured?: ImageAttachment, inline: ImageAttachment[] = []): Promise<{ id: number; link: string }> {
+  async createPost(
+    article: Article, featured?: ImageAttachment, inline: ImageAttachment[] = [],
+    videos: { video: VideoInfo; thumbnail: ImageAttachment | null }[] = [],
+  ): Promise<{ id: number; link: string }> {
     const caption = article.image_credit ? `Foto: ${article.image_credit}` : "";
     let content = article.content_html;
+    if (videos.length) {
+      const blocks: string[] = [];
+      for (const { video, thumbnail } of videos) {
+        const media = thumbnail ? await this.uploadImage(thumbnail, `Video: ${video.title}`, "") : null;
+        blocks.push(videoHtml(video, media));
+      }
+      content = insertAfterParagraph(content, blocks.join("\n"), 2);
+    }
     if (inline.length) {
       const figures: string[] = [];
       for (const img of inline) {
@@ -144,7 +156,31 @@ export function figureHtml(id: number, url: string, alt: string, caption: string
 }
 
 /** Bilder nach dem Einleitungsabsatz einfügen (oder ans Ende, wenn es keinen gibt). */
-export function insertAfterFirstParagraph(html: string, insert: string): string {
-  const i = html.indexOf("</p>");
+export const insertAfterFirstParagraph = (html: string, insert: string) => insertAfterParagraph(html, insert, 1);
+
+/** Nach dem n-ten Absatz einfügen; gibt es weniger Absätze, nach dem letzten bzw. ans Ende. */
+export function insertAfterParagraph(html: string, insert: string, n: number): string {
+  let i = -1;
+  for (let k = 0; k < n; k++) {
+    const next = html.indexOf("</p>", i + 1);
+    if (next === -1) break;
+    i = next;
+  }
   return i === -1 ? `${html}\n${insert}` : `${html.slice(0, i + 4)}\n${insert}\n${html.slice(i + 4)}`;
+}
+
+/**
+ * YouTube cookiefrei: eigenes Vorschaubild aus der Mediathek, verlinkt auf YouTube.
+ * Beim Seitenaufruf wird nichts von Google geladen – kein Player, keine Cookies.
+ * (Absichtlich keine nackte YouTube-URL: daraus würde Jetpack einen Player machen.)
+ */
+export function videoHtml(video: VideoInfo, media: { id: number; url: string } | null): string {
+  const href = escapeHtml(video.url);
+  const title = escapeHtml(video.title || "Video");
+  const label = `▶ Video auf YouTube ansehen${video.title ? `: „${title}“` : ""}`;
+  if (!media) return `<!-- wp:paragraph -->\n<p><a href="${href}" target="_blank" rel="noopener">${label}</a></p>\n<!-- /wp:paragraph -->`;
+  return `<!-- wp:image {"id":${media.id},"sizeSlug":"large","linkDestination":"custom","className":"video-preview"} -->\n` +
+    `<figure class="wp-block-image size-large video-preview"><a href="${href}" target="_blank" rel="noopener">` +
+    `<img src="${escapeHtml(media.url)}" alt="Video: ${title}" class="wp-image-${media.id}"/></a>` +
+    `<figcaption class="wp-element-caption"><a href="${href}" target="_blank" rel="noopener">${label}</a></figcaption></figure>\n<!-- /wp:image -->`;
 }

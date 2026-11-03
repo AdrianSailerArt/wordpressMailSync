@@ -37,6 +37,16 @@ export interface PressMail {
   imageUrls?: string[];
   /** Links, hinter denen vermutlich Pressefotos liegen (WeTransfer, Dropbox, „Pressefotos“ …) */
   downloadLinks?: { url: string; label: string }[];
+  /** YouTube-Video-IDs aus Links und eingebetteten Playern */
+  videoIds?: string[];
+  /** Links, die nach Video aussehen, aber hinter einem Klick-Zähler stecken (CleverReach, Mailchimp …) */
+  videoLinks?: string[];
+}
+
+/** YouTube-Video-ID aus allen üblichen Link-Formen; Kanäle, Playlists ohne Video usw. ergeben null. */
+export function youtubeId(url: string): string | null {
+  const m = url.match(/^https?:\/\/(?:www\.|m\.|music\.)?(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#]*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/i);
+  return m ? m[1]! : null;
 }
 
 export const looksRelevant = (mail: Pick<PressMail, "subject" | "body">) =>
@@ -59,8 +69,18 @@ const stripTags = (s: string) => decodeEntities(s.replace(/<[^>]*>/g, " ")).repl
 const DOWNLOAD_HINT = /wetransfer|we\.tl|dropbox|drive\.google|box\.com|pressefoto|press ?photo|pressebild|bildmaterial|artwork|hi-?res|download/i;
 
 /** Bild- und Download-Links aus dem HTML einer Mail ziehen. */
-export function extractImageLinks(html: string): Required<Pick<PressMail, "imageUrls" | "downloadLinks">> {
+const VIDEO_HINT = /youtube|video|musikvideo|clip|premiere|ansehen|watch now|play/i;
+const NEVER_FOLLOW = /unsubscribe|abmelden|abbestellen|opt-?out|preferences|profil|forward|weiterleiten|webversion|view in browser|im browser/i;
+
+export function extractImageLinks(html: string): Required<Pick<PressMail, "imageUrls" | "downloadLinks" | "videoIds" | "videoLinks">> {
+  const videoLinks = new Set<string>();
   const urls = new Set<string>();
+  const videos = new Set<string>();
+  // Videos: verlinkt, eingebettet (iframe) oder als nackte URL im Text
+  for (const [raw] of html.matchAll(/https?:\/\/[^\s<>"']+/gi)) {
+    const id = youtubeId(decodeEntities(raw));
+    if (id) videos.add(id);
+  }
   for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
     const src = tag.match(/\ssrc=["']([^"']+)["']/i)?.[1];
     if (!src || !/^https?:/i.test(src)) continue;
@@ -74,12 +94,15 @@ export function extractImageLinks(html: string): Required<Pick<PressMail, "image
   const downloadLinks: { url: string; label: string }[] = [];
   for (const [, href, inner] of html.matchAll(/<a\b[^>]*href=["'](https?:[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     const url = decodeEntities(href!);
+    const label = stripTags(inner!);
+    const imgHint = /<img/i.test(inner!) && VIDEO_HINT.test(inner!);
+    if (!youtubeId(url) && (VIDEO_HINT.test(label) || imgHint) && !NEVER_FOLLOW.test(url + " " + label)) videoLinks.add(url);
     if (/\.(jpe?g|png|webp)(\?|$)/i.test(url)) urls.add(url);
     else if (DOWNLOAD_HINT.test(url) || DOWNLOAD_HINT.test(stripTags(inner!))) {
       if (!downloadLinks.some((l) => l.url === url)) downloadLinks.push({ url, label: stripTags(inner!).slice(0, 80) || url });
     }
   }
-  return { imageUrls: [...urls].slice(0, 25), downloadLinks: downloadLinks.slice(0, 10) };
+  return { imageUrls: [...urls].slice(0, 25), downloadLinks: downloadLinks.slice(0, 10), videoIds: [...videos].slice(0, 6), videoLinks: [...videoLinks].slice(0, 8) };
 }
 
 export async function parseMessage(uid: number, source: Buffer): Promise<PressMail> {
@@ -97,7 +120,7 @@ export async function parseMessage(uid: number, source: Buffer): Promise<PressMa
     date: parsed.date?.toISOString() ?? "",
     body: body.trim().slice(0, MAX_BODY_CHARS),
     images,
-    ...(parsed.html ? extractImageLinks(parsed.html) : {}),
+    ...(parsed.html ? extractImageLinks(parsed.html) : { videoIds: extractImageLinks(parsed.text ?? "").videoIds }),
   };
 }
 

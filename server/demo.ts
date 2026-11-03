@@ -95,7 +95,10 @@ export function demoDeps(store: Store, events?: LlmEvents): Deps {
       collect: async (mail) => ({
         images: (DEMO_IMAGES[mail.uid] ?? []).map(({ data, ...info }) => info),
         downloadLinks: mail.uid === 101 ? [{ url: "https://example.com/pressefotos.zip", label: "Pressefotos (hi-res)" }] : [],
+        // öffentliches Beispielvideo aus der YouTube-Dokumentation
+        videos: mail.uid === 101 ? [{ id: "M7lc1UVf-VE", title: "Nordlicht Kollektiv – Weite (Official Video)", channel: "Nordlicht Kollektiv", url: "https://www.youtube.com/watch?v=M7lc1UVf-VE" }] : [],
       }),
+      videoThumbnail: async () => null,
       read: async (mail, id) => {
         const uid = MAILS.find((m) => m.messageId === mail.messageId)?.uid ?? 0;
         return DEMO_IMAGES[uid]?.find((i) => i.id === id) ?? null;

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { imageSize } from "image-size";
-import { IMAGE_TYPES, type ImageAttachment, type PressMail } from "./mail.ts";
+import { IMAGE_TYPES, youtubeId, type ImageAttachment, type PressMail } from "./mail.ts";
 
 export interface ImageInfo {
   id: string;
@@ -17,10 +17,81 @@ export interface ImageInfo {
   url?: string;
 }
 
+export interface VideoInfo {
+  id: string;
+  title: string;
+  channel: string;
+  url: string;
+}
+
 export interface MailImages {
   images: ImageInfo[];
   downloadLinks: { url: string; label: string }[];
+  videos: VideoInfo[];
 }
+
+/** Titel und Kanal über die oEmbed-Schnittstelle von YouTube; private oder gelöschte Videos ergeben null. */
+async function lookupVideo(id: string): Promise<VideoInfo | null> {
+  const url = `https://www.youtube.com/watch?v=${id}`;
+  try {
+    const res = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8_000) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { title?: string; author_name?: string };
+    return { id, url, title: data.title ?? "", channel: data.author_name ?? "" };
+  } catch {
+    return null;
+  }
+}
+
+/** Weiterleitungen eines Klick-Zählers verfolgen, ohne die Zielseite zu laden; liefert die Endadresse. */
+async function resolveRedirect(url: string): Promise<string> {
+  let current = url;
+  for (let hop = 0; hop < 6; hop++) {
+    try {
+      const res = await fetch(current, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(8_000), headers: { "User-Agent": "Mozilla/5.0 (wordpress-mail-sync)" } });
+      await res.body?.cancel(); // Inhalt interessiert nicht
+      const next = res.headers.get("location");
+      if (res.status < 300 || res.status >= 400 || !next) return current;
+      current = new URL(next, current).href;
+      if (youtubeId(current)) return current;
+    } catch {
+      return current;
+    }
+  }
+  return current;
+}
+
+/** Videos der Mail: direkte YouTube-Links plus solche hinter Klick-Zählern; nur öffentliche Videos. */
+export async function lookupVideos(mail: Pick<PressMail, "videoIds" | "videoLinks">): Promise<VideoInfo[]> {
+  const ids = new Set(mail.videoIds ?? []);
+  const resolved = await Promise.all((mail.videoLinks ?? []).map(resolveRedirect));
+  for (const url of resolved) {
+    const id = youtubeId(url);
+    if (id) ids.add(id);
+  }
+  return (await Promise.all([...ids].slice(0, 6).map(lookupVideo))).filter((v): v is VideoInfo => !!v);
+}
+
+/** Vorschaubild eines Videos in bestmöglicher Auflösung (wird in die eigene Mediathek geladen). */
+export async function videoThumbnail(video: VideoInfo): Promise<ImageAttachment | null> {
+  for (const size of ["maxresdefault", "sddefault", "hqdefault"]) {
+    try {
+      const res = await fetch(`https://i.ytimg.com/vi/${video.id}/${size}.jpg`, { signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) continue;
+      const data = Buffer.from(await res.arrayBuffer());
+      // YouTube liefert für fehlende Größen teils ein graues 120×90-Platzhalterbild
+      const dim = measure(data);
+      if (!dim || dim.width < 400) continue;
+      return { filename: `youtube-${video.id}.jpg`, contentType: "image/jpeg", data };
+    } catch {
+      // nächste Größe versuchen
+    }
+  }
+  return null;
+}
+
+/** Bei Änderungen an der Auswertung erhöhen – ältere Zwischenspeicher werden dann ergänzt. */
+const CACHE_VERSION = 2;
 
 /** Kleiner als das ist meist Logo, Icon, Button oder Trenner – als Beitragsbild unbrauchbar. */
 const MIN_LONG_SIDE = 500;
@@ -90,7 +161,16 @@ export class ImageStore {
   collect(mail: PressMail): Promise<MailImages> {
     const folder = this.folder(mail.messageId);
     const index = join(folder, "index.json");
-    if (existsSync(index)) return Promise.resolve(JSON.parse(readFileSync(index, "utf8")) as MailImages);
+    if (existsSync(index)) {
+      const cached = JSON.parse(readFileSync(index, "utf8")) as Partial<MailImages> & { version?: number };
+      if (cached.version === CACHE_VERSION) return Promise.resolve(cached as MailImages);
+      // älterer Zwischenspeicher: Bilder behalten, Videos neu ermitteln
+      return lookupVideos(mail).then((videos) => {
+        const result = { version: CACHE_VERSION, images: cached.images ?? [], downloadLinks: cached.downloadLinks ?? [], videos };
+        writeFileSync(index, JSON.stringify(result));
+        return result;
+      });
+    }
 
     // gleichzeitige Anfragen für dieselbe Mail teilen sich einen Durchlauf
     let job = this.pending.get(folder);
@@ -105,7 +185,7 @@ export class ImageStore {
     const candidates: (ImageAttachment & { origin: ImageInfo["origin"]; url?: string })[] = mail.images.map((a) => ({
       ...a, origin: a.inline ? "eingebettet" : "anhang",
     }));
-    const downloaded = await pool(mail.imageUrls ?? [], 4, download);
+    const [downloaded, videos] = await Promise.all([pool(mail.imageUrls ?? [], 4, download), lookupVideos(mail)]);
     downloaded.forEach((img, i) => img && candidates.push({ ...img, origin: "verlinkt", url: mail.imageUrls![i] }));
 
     mkdirSync(folder, { recursive: true });
@@ -123,9 +203,13 @@ export class ImageStore {
     // Größtes Bild zuerst – das ist der Vorschlag fürs Thumbnail
     images.sort((a, b) => b.width * b.height - a.width * a.height);
 
-    const result: MailImages = { images, downloadLinks: mail.downloadLinks ?? [] };
+    const result = { version: CACHE_VERSION, images, downloadLinks: mail.downloadLinks ?? [], videos };
     writeFileSync(index, JSON.stringify(result));
     return result;
+  }
+
+  videoThumbnail(video: VideoInfo): Promise<ImageAttachment | null> {
+    return videoThumbnail(video);
   }
 
   async read(mail: Pick<PressMail, "messageId">, id: string): Promise<(ImageInfo & { data: Buffer }) | null> {

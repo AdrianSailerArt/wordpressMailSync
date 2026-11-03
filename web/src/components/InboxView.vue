@@ -75,7 +75,7 @@ async function select(mail: MailSummary) {
   // Bilder ebenfalls parallel – beim ersten Mal werden verlinkte Bilder heruntergeladen
   api.images(mail.uid).then((r) => {
     if (selected.value?.uid === mail.uid) images.value = r;
-  }).catch(() => (images.value = { images: [], downloadLinks: [] }));
+  }).catch(() => (images.value = { images: [], downloadLinks: [], videos: [] }));
   if (mail.hasDraft) await preview(false);
 }
 

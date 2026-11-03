@@ -24,6 +24,7 @@ let marks: [number, string][];
 let created: string[];
 let uploaded: { featured?: string; inline: string[] }[];
 let notified: string[];
+let postedVideos: string[][];
 let today: number;
 let rewrites: number;
 
@@ -32,6 +33,7 @@ function pipeline() {
   created = [];
   uploaded = [];
   notified = [];
+  postedVideos = [];
   rewrites = 0;
   return new Pipeline(cfg, {
     mailbox: {
@@ -43,9 +45,10 @@ function pipeline() {
     wordpress: {
       postsToday: async () => today,
       slugExists: async () => false,
-      createPost: async (a, featured, inline = []) => {
+      createPost: async (a, featured, inline = [], videos = []) => {
         created.push(a.slug);
         uploaded.push({ featured: featured?.filename, inline: inline.map((i) => i.filename) });
+        postedVideos.push(videos.map((v) => v.video.id));
         return { id: 1, link: "https://wp/x" };
       },
     },
@@ -57,7 +60,11 @@ function pipeline() {
             .map((i) => ({ ...i, origin: "verlinkt" as const, contentType: "image/jpeg", width: 1600, height: 900, bytes: 1 }))
           : [],
         downloadLinks: [],
+        videos: m.uid === 4
+          ? ["aaaaaaaaaaa", "bbbbbbbbbbb"].map((id) => ({ id, title: `Video ${id[0]}`, channel: "Band", url: `https://www.youtube.com/watch?v=${id}` }))
+          : [],
       }),
+      videoThumbnail: async (v) => ({ filename: `youtube-${v.id}.jpg`, contentType: "image/jpeg", data: Buffer.from("x") }),
       read: async (_m, id) => ({
         id, origin: "verlinkt", filename: id === "aaaaaaaaaaaa" ? "gross.jpg" : "klein.jpg",
         contentType: "image/jpeg", width: 1600, height: 900, bytes: 1, data: Buffer.from("x"),
@@ -163,4 +170,22 @@ test("Vorschlag: erzeugt Entwurf, benachrichtigt, veröffentlicht nichts", async
 
   // zweiter Lauf schlägt die nächste Mail vor, nicht dieselbe noch einmal
   expect((await p.suggest()).suggested?.uid).toBe(4);
+});
+
+test("Videos: automatisch das erste, sonst Auswahl oder keins", async () => {
+  let p = pipeline();
+  await p.publish(4);
+  expect(postedVideos).toEqual([["aaaaaaaaaaa"]]);
+
+  p = pipeline();
+  let draft = await p.preview(4);
+  p.saveDraft(4, { ...draft, videos: ["bbbbbbbbbbb", "aaaaaaaaaaa"] });
+  await p.publish(4);
+  expect(postedVideos).toEqual([["bbbbbbbbbbb", "aaaaaaaaaaa"]]);
+
+  p = pipeline();
+  draft = await p.preview(4);
+  p.saveDraft(4, { ...draft, videos: [] });
+  await p.publish(4);
+  expect(postedVideos).toEqual([[]]);
 });

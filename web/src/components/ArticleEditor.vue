@@ -55,6 +55,14 @@ function toggleInline(id: string) {
   draft.value.inline_images = list.includes(id) ? list.filter((i) => i !== id) : [...list, id];
 }
 
+/** Gewählte Videos: ohne eigene Auswahl automatisch das erste Video der Mail */
+const selectedVideos = computed(() => draft.value.videos ?? props.images?.videos.slice(0, 1).map((v) => v.id) ?? []);
+
+function toggleVideo(id: string) {
+  const list = selectedVideos.value;
+  draft.value.videos = list.includes(id) ? list.filter((v) => v !== id) : [...list, id];
+}
+
 const kb = (bytes: number) => (bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round(bytes / 1e3)} KB`);
 
 const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-amber-400");
@@ -143,9 +151,34 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-
         </figure>
       </div>
 
+      <div v-if="images?.videos.length" class="mt-5">
+        <div class="label"><span>Videos</span><span>cookiefrei: eigenes Vorschaubild mit Link zu YouTube</span></div>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <button
+            v-for="v in images.videos"
+            :key="v.id"
+            class="flex items-center gap-3 rounded-md border p-2 text-left transition-colors"
+            :class="selectedVideos.includes(v.id) ? 'border-zinc-900 dark:border-white' : 'border-zinc-200 opacity-70 hover:opacity-100 dark:border-zinc-800'"
+            @click="toggleVideo(v.id)"
+          >
+            <span class="relative block aspect-video w-28 shrink-0 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-900">
+              <img :src="`https://i.ytimg.com/vi/${v.id}/mqdefault.jpg`" :alt="v.title" loading="lazy" class="size-full object-cover" />
+              <span class="absolute inset-0 flex items-center justify-center text-lg text-white drop-shadow">▶</span>
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="line-clamp-2 text-sm font-medium">{{ v.title || v.id }}</span>
+              <span class="block truncate text-xs text-zinc-500">{{ v.channel }}</span>
+              <span class="mt-1 block text-[11px]" :class="selectedVideos.includes(v.id) ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'">
+                {{ selectedVideos.includes(v.id) ? "✓ im Beitrag" : "nicht im Beitrag" }}
+              </span>
+            </span>
+          </button>
+        </div>
+      </div>
+
       <ul v-if="images?.downloadLinks.length" class="mt-3 space-y-1 text-xs">
         <li v-for="l in images.downloadLinks" :key="l.url" class="truncate">
-          <span class="text-zinc-500">Pressefotos: </span>
+          <span class="text-zinc-500">Nur für dich, nicht im Artikel – Pressefotos: </span>
           <a :href="l.url" target="_blank" rel="noopener" class="underline underline-offset-2">{{ l.label }}</a>
         </li>
       </ul>

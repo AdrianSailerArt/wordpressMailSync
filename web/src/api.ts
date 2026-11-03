@@ -17,6 +17,15 @@ export interface Article {
   featured_image: string;
   inline_images: string[];
   generated_by: string;
+  /** fehlt = automatisch das erste Video, [] = keins, sonst gewählte YouTube-IDs */
+  videos?: string[];
+}
+
+export interface VideoInfo {
+  id: string;
+  title: string;
+  channel: string;
+  url: string;
 }
 
 export interface LlmModel {
@@ -72,6 +81,7 @@ export interface ImageInfo {
 export interface MailImages {
   images: ImageInfo[];
   downloadLinks: { url: string; label: string }[];
+  videos: VideoInfo[];
 }
 
 export interface MailSummary {

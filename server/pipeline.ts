@@ -2,7 +2,7 @@
 
 import type { Config } from "./config.ts";
 import type { LogKind, Store } from "./db.ts";
-import type { ImageInfo, MailImages } from "./images.ts";
+import type { ImageInfo, MailImages, VideoInfo } from "./images.ts";
 import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type ImageAttachment, type PressMail } from "./mail.ts";
 import { cleanArticle, type Article } from "./rewrite.ts";
 
@@ -16,12 +16,15 @@ export interface Deps {
   wordpress: {
     postsToday(): Promise<number>;
     slugExists(slug: string): Promise<boolean>;
-    createPost(article: Article, featured?: ImageAttachment, inline?: ImageAttachment[]): Promise<{ id: number; link: string }>;
+    createPost(
+      article: Article, featured?: ImageAttachment, inline?: ImageAttachment[], videos?: { video: VideoInfo; thumbnail: ImageAttachment | null }[],
+    ): Promise<{ id: number; link: string }>;
   };
   rewriter: { rewrite(mail: PressMail): Promise<Article> };
   images: {
     collect(mail: PressMail): Promise<MailImages>;
     read(mail: Pick<PressMail, "messageId">, id: string): Promise<(ImageInfo & { data: Buffer }) | null>;
+    videoThumbnail(video: VideoInfo): Promise<ImageAttachment | null>;
   };
   notifier?: { notify(n: { title: string; body: string; url: string; tag: string }): Promise<void> };
   store: Store;
@@ -138,6 +141,14 @@ export class Pipeline {
     return this.deps.images.read({ messageId }, id);
   }
 
+  /** Videos laut Entwurf (Standard: erstes Video der Mail) samt Vorschaubild für die cookiefreie Einbindung. */
+  private async pickVideos(mail: PressMail, article: Article) {
+    const { videos } = await this.deps.images.collect(mail);
+    const ids = article.videos ?? videos.slice(0, 1).map((v) => v.id);
+    const chosen = ids.map((id) => videos.find((v) => v.id === id)).filter((v): v is VideoInfo => !!v);
+    return Promise.all(chosen.map(async (video) => ({ video, thumbnail: await this.deps.images.videoThumbnail(video) })));
+  }
+
   /** Beitragsbild und Bilder im Text gemäß Auswahl im Entwurf (Standard: größtes Bild als Thumbnail). */
   private async pickImages(mail: PressMail, article: Article): Promise<{ featured?: ImageAttachment; inline: ImageAttachment[] }> {
     const { images } = await this.deps.images.collect(mail);
@@ -180,7 +191,7 @@ export class Pipeline {
     // Regeln (z. B. „nicht gendern“) auch auf ältere oder von Hand bearbeitete Entwürfe anwenden
     const article = cleanArticle(draft, this.cfg.wp.categories);
     const { featured, inline } = await this.pickImages(mail, article);
-    const post = await this.deps.wordpress.createPost(article, featured, inline);
+    const post = await this.deps.wordpress.createPost(article, featured, inline, await this.pickVideos(mail, article));
     await this.markMail(mail, DONE_FLAG);
     this.log("published", article.title, mail.subject, post.link);
     return post;

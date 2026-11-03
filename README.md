@@ -36,9 +36,14 @@ IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ─�
 6. **Bilder** – Anhänge, eingebettete und verlinkte Bilder der Mail werden gesammelt; Logos,
    Icons, Banner und Tracking-Pixel fliegen nach Größe raus. Das größte Bild wird Thumbnail,
    im Dashboard lässt sich das ändern und weitere Bilder in den Text einfügen.
-7. **WordPress** – Beitrag mit Kategorie, Tags, Auszug, Yoast-Feldern, Beitragsbild und
+   **YouTube-Videos** werden erkannt – auch hinter Klick-Zählern von Newsletter-Diensten – und
+   **cookiefrei** eingebunden: eigenes Vorschaubild in der Mediathek, verlinkt auf YouTube. Beim
+   Seitenaufruf wird nichts von Google geladen. Standard: das erste Video der Mail.
+7. **Link-Filter** – Download-, Presseordner- und Hörproben-Links (WeTransfer, Dropbox, private
+   SoundCloud-Links, ZIP/MP3/PDF …) sowie YouTube-URLs werden aus dem Text entfernt.
+8. **WordPress** – Beitrag mit Kategorie, Tags, Auszug, Yoast-Feldern, Beitragsbild und
    optional Bildern im Text.
-8. **Merken** – erledigte Mails stehen in der lokalen Datenbank (zusätzlich IMAP-Keyword, wo
+9. **Merken** – erledigte Mails stehen in der lokalen Datenbank (zusätzlich IMAP-Keyword, wo
    der Server das erlaubt) – nichts wird doppelt verarbeitet.
 
 ### Zeitpläne
@@ -149,7 +154,11 @@ wordpress/   MU-Plugin für die SEO-Felder
   Bedarf die Nutzungsbedingungen der Agentur. Download-Links (WeTransfer, Dropbox …) zeigt das
   Dashboard an, lädt sie aber nicht automatisch.
 - Beim Laden verlinkter Bilder sieht der Absender ggf., dass die Mail „geöffnet“ wurde
-  (wie bei jedem Mailprogramm, das Bilder anzeigt).
+  (wie bei jedem Mailprogramm, das Bilder anzeigt). Beim Auflösen von Video-Links hinter
+  Klick-Zählern zählt der Newsletter-Dienst einen „Klick“.
+- Ältere Beiträge auf tribe-online.de binden YouTube per URL ein; Jetpack lädt den Player dann
+  sofort beim Seitenaufruf (Cookies ohne Einwilligung). Der Cookie-Hinweis „Simple Cookie
+  Notice Bar“ blockiert das nicht. Neue Beiträge aus diesem Tool sind davon nicht betroffen.
 - E-Mail-Inhalte gelten als nicht vertrauenswürdig: Das Modell ist angewiesen, Anweisungen in
   Mails zu ignorieren, und das erzeugte HTML wird vor dem Veröffentlichen auf eine
   Tag-Whitelist bereinigt.

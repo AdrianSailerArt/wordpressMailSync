@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ImageStore } from "../server/images.ts";
-import { extractImageLinks, looksRelevant, parseMessage, type PressMail } from "../server/mail.ts";
-import { ArticleSchema, cleanArticle, degender, slugify, tidyContent } from "../server/rewrite.ts";
+import { extractImageLinks, looksRelevant, parseMessage, youtubeId, type PressMail } from "../server/mail.ts";
+import { ArticleSchema, cleanArticle, degender, isBlockedLink, slugify, stripPressLinks, tidyContent } from "../server/rewrite.ts";
+import { insertAfterParagraph, videoHtml } from "../server/wordpress.ts";
 
 function rawMail(subject: string, html: string, image?: Buffer): Buffer {
   const boundary = "XYZ";
@@ -148,5 +149,72 @@ describe("Bilder", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Links und Videos", () => {
+  test("YouTube-IDs aus allen Link-Formen, Kanäle zählen nicht", () => {
+    for (const url of [
+      "https://www.youtube.com/watch?v=qWWILgG5yvE", "https://www.youtube.com/watch?feature=share&v=qWWILgG5yvE&t=59s",
+      "https://youtu.be/qWWILgG5yvE?si=x", "https://www.youtube.com/embed/qWWILgG5yvE", "https://www.youtube-nocookie.com/embed/qWWILgG5yvE",
+      "https://youtube.com/shorts/qWWILgG5yvE", "https://m.youtube.com/watch?v=qWWILgG5yvE",
+    ]) expect(youtubeId(url)).toBe("qWWILgG5yvE");
+    for (const url of ["https://www.youtube.com/@band", "https://www.youtube.com/user/TribeOnlineMagazin", "https://www.youtube.com/channel/UC123", "https://example.com/watch?v=qWWILgG5yvE"])
+      expect(youtubeId(url)).toBeNull();
+  });
+
+  test("Videos werden in der Mail erkannt (Link, Player, Text)", () => {
+    const { videoIds } = extractImageLinks(`<a href="https://youtu.be/AAAAAAAAAAA">Video</a>
+      <iframe src="https://www.youtube.com/embed/BBBBBBBBBBB"></iframe> Jetzt ansehen: https://www.youtube.com/watch?v=CCCCCCCCCCC
+      <a href="https://www.youtube.com/@band">Kanal abonnieren</a> <a href="https://youtu.be/AAAAAAAAAAA">nochmal</a>`);
+    expect(videoIds).toEqual(["AAAAAAAAAAA", "BBBBBBBBBBB", "CCCCCCCCCCC"]);
+  });
+
+  test("Video-Links hinter Klick-Zählern werden zum Auflösen vorgemerkt, Abmelde-Links nie", () => {
+    const { videoLinks } = extractImageLinks(`
+      <a href="https://x.cleverreach.com/c/1">Zum Musikvideo</a>
+      <a href="https://us.list-manage.com/track/click?u=2"><img src="play-button.png" alt="Video ansehen"></a>
+      <a href="https://x.cleverreach.com/c/3">Tickets</a>
+      <a href="https://x.cleverreach.com/unsubscribe/4">Video-Newsletter abbestellen</a>
+      <a href="https://youtu.be/AAAAAAAAAAA">Video</a>`);
+    expect(videoLinks).toEqual(["https://x.cleverreach.com/c/1", "https://us.list-manage.com/track/click?u=2"]);
+  });
+
+  test("gesperrte Links: Downloads, Presseordner, Hörproben, Dateien", () => {
+    for (const [href, text] of [
+      ["https://we.tl/t-abc", "hier"], ["https://www.dropbox.com/s/x/fotos.zip", "Fotos"], ["https://drive.google.com/drive/folders/x", "Ordner"],
+      ["https://label.example/presse/band", "Mehr"], ["https://label.example/files/album.zip", "Album"], ["https://label.example/info.pdf", "Info"],
+      ["https://soundcloud.com/band/song/s-AbC123", "Song"], ["https://band.example", "Pressefotos herunterladen"], ["https://x.example", "Hörprobe"],
+    ]) expect(isBlockedLink(href!, text)).toBe(true);
+    for (const [href, text] of [
+      ["https://tickets.example/band", "Tickets"], ["https://band.example", "Website"], ["https://napalmrecords.com/band", "Vorbestellen"],
+      ["https://soundcloud.com/band/song", "Song"], ["https://open.spotify.com/album/x", "Spotify"],
+    ]) expect(isBlockedLink(href!, text)).toBe(false);
+  });
+
+  test("Filter im Text: Absätze nur mit Link fallen weg, sonst bleibt der Text", () => {
+    const out = stripPressLinks(`<p>Pressefotos: <a href="https://we.tl/t-abc">hier</a></p>` +
+      `<p>Das Album erscheint über <a href="https://label.example/shop">Napalm Records</a>, Fotos im <a href="https://label.example/presse/">Presseordner</a>.</p>` +
+      `<p>https://www.youtube.com/watch?v=qWWILgG5yvE</p><p>Das Video zu <a href="https://youtu.be/qWWILgG5yvE">„Anfang“</a> ist online.</p>` +
+      `<ul><li>Hörprobe: <a href="https://soundcloud.com/b/s/s-AbC123">privat</a></li><li>12.03.2027 – Köln – Gloria</li></ul>`);
+    expect(out).toBe(`<p>Das Album erscheint über <a href="https://label.example/shop">Napalm Records</a>, Fotos im Presseordner.</p>` +
+      `<p>Das Video zu „Anfang“ ist online.</p><ul><li>12.03.2027 – Köln – Gloria</li></ul>`);
+  });
+
+  test("Video wird cookiefrei eingebunden: eigenes Vorschaubild mit Link, kein Player, keine nackte URL", () => {
+    const video = { id: "qWWILgG5yvE", title: "Anfang <live>", channel: "Eisbrecher", url: "https://www.youtube.com/watch?v=qWWILgG5yvE" };
+    const html = videoHtml(video, { id: 42, url: "https://www.tribe-online.de/wp-content/uploads/youtube-qWWILgG5yvE.jpg" });
+    expect(html).toContain('class="wp-image-42"');
+    expect(html).toContain('href="https://www.youtube.com/watch?v=qWWILgG5yvE"');
+    expect(html).toContain("Anfang &lt;live&gt;");
+    expect(html).not.toMatch(/<iframe|ytimg|youtube-nocookie/);
+    expect(html).not.toMatch(/^\s*https?:\/\/\S+\s*$/m); // Jetpack würde aus einer URL-Zeile einen Player machen
+    expect(videoHtml(video, null)).toContain("Video auf YouTube ansehen");
+  });
+
+  test("Einfügen nach dem n-ten Absatz", () => {
+    expect(insertAfterParagraph("<p>a</p><p>b</p><p>c</p>", "X", 2)).toBe("<p>a</p><p>b</p>\nX\n<p>c</p>");
+    expect(insertAfterParagraph("<p>a</p>", "X", 2)).toBe("<p>a</p>\nX\n");
+    expect(insertAfterParagraph("ohne Absatz", "X", 2)).toBe("ohne Absatz\nX");
   });
 });

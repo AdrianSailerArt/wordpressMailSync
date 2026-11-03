@@ -6,7 +6,7 @@ import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
 import type { Config } from "./config.ts";
 import type { LlmEvents, LlmStage, LlmStats, LlmTrace } from "./llm-events.ts";
-import type { PressMail } from "./mail.ts";
+import { youtubeId, type PressMail } from "./mail.ts";
 
 const ALLOWED_TAGS = ["h2", "h3", "p", "ul", "ol", "li", "strong", "em", "a", "br",
   "table", "thead", "tbody", "tr", "th", "td", "blockquote"];
@@ -67,6 +67,8 @@ keine Umlaute).
 <h2>, Tourdaten als <ul> mit „Datum – Stadt – Venue“, ein Abschnitt zu Tickets falls \
 bekannt. Länge je nach Meldung laut Regelwerk, meist 200–450 Wörter. Erlaubte Tags: h2, h3, p, ul, ol, li, strong, em, a, table, \
 blockquote. Keine h1, kein Inline-CSS, keine Bilder.
+- Keine Links zu Downloads, Presseordnern, Pressefotos oder Hörproben (WeTransfer, Dropbox, \
+private SoundCloud-Links usw.) und keine YouTube-Links – Videos bindet die Redaktion selbst ein.
 - Nicht gendern: keine Genderzeichen (: * _ Binnen-I), generisches Maskulinum (Leser, Fans, Musiker).
 - excerpt: 1–2 Sätze Teaser.
 - category: genau eine aus {categories}.
@@ -93,12 +95,14 @@ export const ArticleSchema = z.object({
   inline_images: z.array(z.string()).default([]),
   // welches Modell den Entwurf geschrieben hat
   generated_by: z.string().default(""),
+  // YouTube-Videos: fehlt = automatisch das erste Video der Mail, [] = keins, sonst gewählte IDs
+  videos: z.array(z.string()).optional(),
 });
 
 export type Article = z.infer<typeof ArticleSchema>;
 
 const FIELDS = (Object.keys(ArticleSchema.shape) as (keyof Article)[])
-  .filter((k) => k !== "featured_image" && k !== "inline_images" && k !== "generated_by");
+  .filter((k) => !["featured_image", "inline_images", "generated_by", "videos"].includes(k));
 const JSON_SCHEMA = {
   type: "object",
   properties: Object.fromEntries(
@@ -146,9 +150,55 @@ const degenderHtml = (html: string) => html.split(/(<[^>]+>)/).map((part) => (pa
 /** Markdown-Reste entfernen, die lokale Modelle gern in Textfelder schreiben. */
 const plain = (s: string) => degender(s).replace(/\*\*(.+?)\*\*/g, "$1").replace(/(^|\s)\*(\S.*?)\*(?=[\s.,;:!?)]|$)/g, "$1$2").replace(/\s+/g, " ").trim();
 
+/** Ziele, die nie in einen Artikel gehören: Download-Dienste, Presseordner, private Hörproben, Dateien. */
+const BLOCKED_HOST = /(^|\.)(wetransfer\.com|we\.tl|dropbox\.com|db\.tt|drive\.google\.com|docs\.google\.com|box\.com|mega\.nz|1drv\.ms|onedrive\.live\.com|sharepoint\.com|icloud\.com|sendspace\.com|filemail\.com|transfernow\.net|fromsmash\.com|swisstransfer\.com|haulix\.com|promoreel\.com|label-worx\.com|music-promo\.\w+)$/i;
+const BLOCKED_PATH = /\.(zip|rar|7z|wav|mp3|flac|aiff?|pdf)$|^\/(presse|press|pressebereich|presskit|press-kit|epk|download|downloads|promo)(\/|$)/i;
+const BLOCKED_TEXT = /download|herunterladen|presse-?(fotos?|bilder?|material|kit|bereich|ordner|mappe)|press ?(kit|area|photos?)|\bepk\b|hörprobe|vorab-?stream|promo-?(link|stream)|private[rn]? stream|listening link/i;
+
+export function isBlockedLink(href: string, text = ""): boolean {
+  if (BLOCKED_TEXT.test(text)) return true;
+  try {
+    const url = new URL(href);
+    if (BLOCKED_HOST.test(url.hostname) || BLOCKED_PATH.test(url.pathname)) return true;
+    // private SoundCloud-Links (Hörproben) haben ein geheimes Token „/s-…“
+    if (/soundcloud\.com$/i.test(url.hostname) && /\/s-[A-Za-z0-9]+/.test(url.pathname)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+const MARK = "\u2063"; // unsichtbares Trennzeichen als Markierung entfernter Links
+
+/**
+ * Redaktionsregel: keine Download-, Presseordner- oder Hörproben-Links im Artikel.
+ * Absätze, die nur aus so einem Link bestehen, fallen weg; sonst bleibt der Text ohne Link.
+ * YouTube-Links werden ebenfalls entfernt – Videos bindet das Tool cookiefrei separat ein.
+ */
+export function stripPressLinks(html: string): string {
+  const marked = html
+    .replace(/<a\b[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (m, href: string, text: string) => {
+      const label = text.replace(/<[^>]+>/g, "").trim();
+      if (isBlockedLink(href, label)) return `${MARK}${text}${MARK}`;
+      // YouTube: Linktext behalten (z. B. Songtitel), nur der Link fällt weg – außer der Text ist selbst die URL
+      if (youtubeId(href)) return /^https?:\/\//.test(label) ? `${MARK}${MARK}` : text;
+      return m;
+    })
+    .replace(/(^|[\s>(])(https?:\/\/[^\s<>"')]+)/g, (m, pre: string, url: string) =>
+      isBlockedLink(url) || youtubeId(url) ? `${pre}${MARK}${MARK}` : m);
+
+  return marked.replace(/<(p|li)\b[^>]*>([\s\S]*?)<\/\1>/gi, (block, _tag, inner: string) => {
+    if (!inner.includes(MARK)) return block;
+    const rest = inner.replace(new RegExp(`${MARK}[\\s\\S]*?${MARK}`, "g"), "").replace(/<[^>]+>/g, "").trim();
+    // Nur Hinweis + Link („Pressefotos: hier“, „Download:“) → ganzen Absatz entfernen
+    if (rest.replace(/[\s:.,–-]+/g, " ").trim().length < 30 || BLOCKED_TEXT.test(rest)) return "";
+    return block.replaceAll(MARK, "").replace(/\s+([.,;:!?])/g, "$1");
+  }).replaceAll(MARK, "");
+}
+
 /** Typische Formfehler im Beitragstext beheben, bevor das HTML gefiltert wird. */
 export function tidyContent(html: string): string {
-  return degenderHtml(html)
+  return degenderHtml(stripPressLinks(html))
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")           // Markdown-Fett → HTML
     .replace(/^\s*<h[23][^>]*>[\s\S]*?<\/h[23]>\s*/i, "")       // Beitrag beginnt mit dem Einstieg, nicht mit einer Überschrift
     .replace(/(^|[^\d.])(\d)\.(\d{2})\.(\d{2,4})(?!\d)/g, "$10$2.$3.$4"); // 1.04.2027 → 01.04.2027

@@ -85,9 +85,17 @@ Festival-Ankündigungen 2025/2026). Gilt für jeden automatisch erstellten Beitr
 - Zusätze wie „ausverkauft“, „Zusatzshow“, „mit Special Guests“ hinter dem Termin übernehmen.
 - Abschluss mit einer Ticket-Zeile: „Infos & Tickets: Link“ (Linktext = Domain oder „Tickets“).
 - Nur Links verwenden, die in der Mail stehen. Keine Social-Media-Teilen-Links.
+- **Niemals** Links zu Downloads, Presseordnern, Pressebereichen, Pressefotos, Pressekits/EPKs
+  oder Hörproben in den Artikel – auch nicht als „Hier reinhören“. Dazu zählen WeTransfer,
+  Dropbox, Google Drive, private SoundCloud-Links, ZIP-, MP3-, WAV- und PDF-Dateien. Diese
+  Links sind für die Redaktion gedacht, nicht für Leser. Erlaubt sind Tickets, offizielle
+  Band- und Festival-Websites, Vorbestellung beim Label und öffentliche Streaming-Seiten.
+- **Keine YouTube-Links und keine YouTube-URLs** in den Text schreiben. Videos bindet das Tool
+  separat und cookiefrei ein (Vorschaubild mit Link).
 
 ## Was nicht in den Text gehört
 
-- Kontaktdaten der Agentur, Abmeldelinks, „Für Rückfragen …“, Pressetext-Hinweise, Sperrfristen.
+- Kontaktdaten der Agentur, Abmeldelinks, „Für Rückfragen …“, Pressetext-Hinweise, Sperrfristen,
+  Hinweise auf Pressefotos oder Promo-Material.
 - Superlative ohne Beleg aus der Mail („größte Tour aller Zeiten“) – höchstens als Zitat.
 - Rechtschreibung der Pressemitteilung nicht übernehmen, wenn sie falsch ist.
