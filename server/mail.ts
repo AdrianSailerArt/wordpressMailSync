@@ -3,7 +3,7 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { convert } from "html-to-text";
-import type { Config } from "./config.ts";
+import type { ImapAccount } from "./config.ts";
 
 export const DONE_FLAG = "$PressbotDone";
 export const SKIPPED_FLAG = "$PressbotSkipped";
@@ -29,6 +29,8 @@ export interface PressMail {
   uid: number;
   /** Message-ID-Header – bleibt auch beim Verschieben gleich und dient als Schlüssel in der Datenbank */
   messageId: string;
+  /** Name des Postfachs, aus dem die Mail stammt */
+  account?: string;
   subject: string;
   sender: string;
   date: string;
@@ -136,8 +138,74 @@ export async function parseMessage(uid: number, source: Buffer): Promise<PressMa
   };
 }
 
+/**
+ * Mail-IDs über alle Postfächer: Postfach-Nummer × 2³² + IMAP-UID. Fürs erste Postfach ist das
+ * genau die UID – Entwürfe und Protokolle aus der Zeit mit einem Postfach bleiben gültig.
+ */
+const ACCOUNT_SPAN = 2 ** 32;
+export const mailId = (account: number, uid: number) => account * ACCOUNT_SPAN + uid;
+export const splitMailId = (id: number) => ({ account: Math.floor(id / ACCOUNT_SPAN), uid: id % ACCOUNT_SPAN });
+
+export interface MailboxStatus {
+  name: string;
+  folder: string;
+  error?: string;
+}
+
+/** Alle Postfächer zusammen; fällt eins aus, laufen die anderen weiter. */
+export class Mailboxes {
+  private boxes: Mailbox[];
+  private errors = new Map<number, string>();
+
+  constructor(accounts: ImapAccount[], maxAgeDays: number) {
+    this.boxes = accounts.map((a) => new Mailbox(a, maxAgeDays));
+  }
+
+  status(): MailboxStatus[] {
+    return this.boxes.map((b, i) => ({ name: b.cfg.name, folder: b.cfg.folder, error: this.errors.get(i) }));
+  }
+
+  private box(id: number) {
+    const { account, uid } = splitMailId(id);
+    const box = this.boxes[account];
+    if (!box) throw new Error(`Postfach ${account + 1} ist nicht eingerichtet`);
+    return { box, account, uid };
+  }
+
+  private tag(mail: PressMail, account: number): PressMail {
+    return { ...mail, uid: mailId(account, mail.uid), account: this.boxes[account]!.cfg.name };
+  }
+
+  async candidates(done: Set<string> = new Set()): Promise<PressMail[]> {
+    const results = await Promise.allSettled(this.boxes.map((b) => b.candidates(done)));
+    const mails: PressMail[] = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        this.errors.delete(i);
+        mails.push(...r.value.map((m) => this.tag(m, i)));
+      } else {
+        this.errors.set(i, r.reason instanceof Error ? r.reason.message : String(r.reason));
+      }
+    });
+    // nur wenn gar nichts geht, ist das ein Fehler – sonst zeigt das Dashboard das kaputte Postfach an
+    if (results.every((r) => r.status === "rejected")) throw (results[0] as PromiseRejectedResult).reason;
+    return mails.sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  async get(id: number): Promise<PressMail | null> {
+    const { box, account, uid } = this.box(id);
+    const mail = await box.get(uid);
+    return mail && this.tag(mail, account);
+  }
+
+  mark(id: number, flag: typeof DONE_FLAG | typeof SKIPPED_FLAG): Promise<void> {
+    const { box, uid } = this.box(id);
+    return box.mark(uid, flag);
+  }
+}
+
 export class Mailbox {
-  constructor(private cfg: Config["imap"]) {}
+  constructor(readonly cfg: ImapAccount, private maxAgeDays: number) {}
 
   /** Öffnet eine Verbindung, sperrt den Ordner und schließt beides wieder. */
   private async withFolder<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
@@ -165,7 +233,7 @@ export class Mailbox {
    */
   candidates(done: Set<string> = new Set()): Promise<PressMail[]> {
     return this.withFolder(async (client) => {
-      const since = new Date(Date.now() - this.cfg.maxAgeDays * 86_400_000);
+      const since = new Date(Date.now() - this.maxAgeDays * 86_400_000);
       const uids =
         (await client.search(
           { since, not: { or: [{ keyword: DONE_FLAG }, { keyword: SKIPPED_FLAG }] } },

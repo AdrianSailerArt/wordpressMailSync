@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
-import { api, formatDate, type Article, type MailImages, type MailSummary, type OriginalMail, type Status } from "../api";
+import { api, formatDate, type Article, type MailboxStatus, type MailImages, type MailSummary, type OriginalMail, type Status } from "../api";
 import { live } from "../llm";
 import ArticleEditor from "./ArticleEditor.vue";
 import LiveOutput from "./LiveOutput.vue";
@@ -10,6 +10,11 @@ const props = defineProps<{ status: Status | null; openUid?: number | null }>();
 const emit = defineEmits<{ changed: []; opened: [] }>();
 
 const mails = ref<MailSummary[]>([]);
+const mailboxes = ref<MailboxStatus[]>([]);
+/** Postfach-Kennung nur zeigen, wenn es mehrere gibt */
+const multi = computed(() => mailboxes.value.length > 1);
+const failed = computed(() => mailboxes.value.filter((m) => m.error));
+const duplicateCount = computed(() => mails.value.reduce((n, m) => n + m.duplicates.length, 0));
 const loading = ref(true);
 const error = ref("");
 const selected = ref<MailSummary | null>(null);
@@ -30,7 +35,7 @@ const limitReached = computed(() => (props.status ? props.status.today >= props.
 async function load() {
   loading.value = true;
   try {
-    mails.value = await api.mails();
+    ({ mails: mails.value, mailboxes: mailboxes.value } = await api.mails());
     error.value = "";
     // aus einer Benachrichtigung geöffnet → passende Mail direkt anzeigen
     const target = props.openUid && mails.value.find((m) => m.uid === props.openUid);
@@ -156,7 +161,13 @@ onMounted(load);
         <button class="btn -mr-3 ml-auto h-7 text-xs" :disabled="loading" @click="load">Neu laden</button>
       </div>
 
-      <p v-if="loading" class="py-6 text-sm text-zinc-500">Postfach wird gelesen …</p>
+      <p v-for="f in failed" :key="f.name" class="mb-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+        <span class="font-medium">{{ f.name }}</span> nicht erreichbar: {{ f.error }}
+      </p>
+      <p v-if="duplicateCount && !loading" class="mb-2 text-xs text-zinc-500">
+        {{ duplicateCount }} doppelte Mail{{ duplicateCount === 1 ? "" : "s" }} zusammengefasst
+      </p>
+      <p v-if="loading" class="py-6 text-sm text-zinc-500">{{ multi ? "Postfächer werden gelesen …" : "Postfach wird gelesen …" }}</p>
       <p v-else-if="!visible.length" class="py-6 text-sm text-zinc-500">{{ filter === "drafts" ? "Noch keine Vorschläge." : "Keine neuen Mails." }}</p>
       <ul v-else class="-mx-2 max-h-[75vh] overflow-y-auto">
         <li v-for="m in visible" :key="m.uid">
@@ -173,6 +184,14 @@ onMounted(load);
               <span class="truncate">{{ m.sender.replace(/<.*>/, "").trim() || m.sender }}</span>
               <span class="ml-auto shrink-0 tabular-nums">{{ formatDate(m.date) }}</span>
             </div>
+            <div v-if="multi || m.duplicates.length" class="mt-1 flex flex-wrap gap-1 text-[11px] leading-4">
+              <span v-if="multi" class="truncate rounded bg-zinc-100 px-1.5 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400" :title="`Postfach: ${m.account}`">{{ m.account }}</span>
+              <span
+                v-if="m.duplicates.length"
+                class="rounded bg-sky-50 px-1.5 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                :title="`Dieselbe Mail auch in: ${m.duplicates.map((d) => d.account).join(', ')} – zusammengefasst`"
+              >{{ m.duplicates.length + 1 }}× erhalten</span>
+            </div>
           </button>
         </li>
       </ul>
@@ -188,7 +207,18 @@ onMounted(load);
         <div class="mb-6 flex flex-wrap items-start gap-4">
           <div class="mr-auto min-w-0">
             <h2 class="text-base font-semibold leading-snug">{{ selected.subject }}</h2>
-            <p class="mt-0.5 text-xs text-zinc-500">{{ selected.sender }} · {{ formatDate(selected.date) }}</p>
+            <p class="mt-0.5 text-xs text-zinc-500">
+              {{ selected.sender }} · {{ formatDate(selected.date) }}<template v-if="multi"> · {{ selected.account }}</template>
+            </p>
+            <div v-if="selected.duplicates.length" class="mt-2 rounded-md bg-sky-50 px-2.5 py-2 text-xs text-sky-800 dark:bg-sky-950/60 dark:text-sky-200">
+              <p class="font-medium">Dieselbe Mail kam {{ selected.duplicates.length + 1 }}× an – hier zusammengefasst</p>
+              <ul class="mt-1 space-y-0.5 text-sky-700 dark:text-sky-300">
+                <li v-for="d in selected.duplicates" :key="d.uid" class="truncate">
+                  {{ d.account || "gleiches Postfach" }} · {{ d.sender.replace(/<.*>/, "").trim() || d.sender }} · {{ formatDate(d.date) }}<template v-if="d.subject !== selected.subject"> · „{{ d.subject }}“</template>
+                </li>
+              </ul>
+              <p class="mt-1 text-sky-600/80 dark:text-sky-400/80">Veröffentlichen oder Überspringen erledigt alle Exemplare.</p>
+            </div>
           </div>
           <div class="flex gap-1">
             <button class="btn btn-danger" :disabled="!!busy" @click="skip">Überspringen</button>

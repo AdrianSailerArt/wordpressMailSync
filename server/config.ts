@@ -23,6 +23,39 @@ function parseCategories(value: string): { categories: string[]; categorySlugs: 
   return { categories, categorySlugs };
 }
 
+/**
+ * Postfächer: das erste über IMAP_*, weitere über IMAP_2_*, IMAP_3_* … (bis 9).
+ * Host, Port und Ordner übernehmen weitere Postfächer vom ersten, wenn sie fehlen.
+ */
+function imapAccounts() {
+  const first = {
+    name: env("IMAP_NAME", process.env.IMAP_USER?.trim() || "Postfach 1"),
+    host: env("IMAP_HOST"),
+    port: Number(env("IMAP_PORT", "993")),
+    user: env("IMAP_USER"),
+    password: env("IMAP_PASSWORD"),
+    folder: env("IMAP_FOLDER", "INBOX"),
+    processedFolder: env("IMAP_PROCESSED_FOLDER", ""),
+  };
+  const accounts = [first];
+  for (let n = 2; n <= 9; n++) {
+    const p = `IMAP_${n}_`;
+    if (!Object.keys(process.env).some((k) => k.startsWith(p) && process.env[k]?.trim())) continue;
+    accounts.push({
+      name: env(`${p}NAME`, process.env[`${p}USER`]?.trim() || `Postfach ${n}`),
+      host: env(`${p}HOST`, first.host),
+      port: Number(env(`${p}PORT`, String(first.port))),
+      user: env(`${p}USER`),
+      password: env(`${p}PASSWORD`),
+      folder: env(`${p}FOLDER`, first.folder),
+      processedFolder: env(`${p}PROCESSED_FOLDER`, ""),
+    });
+  }
+  return accounts;
+}
+
+export type ImapAccount = ReturnType<typeof imapAccounts>[number];
+
 export type SeoPlugin = "yoast" | "rankmath" | "none";
 export type LlmProvider = "ollama" | "claude";
 
@@ -33,12 +66,7 @@ export function loadConfig() {
   if (provider === "claude") env("ANTHROPIC_API_KEY");
   const config = {
     imap: {
-      host: env("IMAP_HOST"),
-      port: Number(env("IMAP_PORT", "993")),
-      user: env("IMAP_USER"),
-      password: env("IMAP_PASSWORD"),
-      folder: env("IMAP_FOLDER", "INBOX"),
-      processedFolder: env("IMAP_PROCESSED_FOLDER", ""),
+      accounts: imapAccounts(),
       maxAgeDays: Number(env("MAX_AGE_DAYS", "7")),
     },
     wp: {

@@ -66,7 +66,7 @@ const api = new Hono()
         model: cfg.llm.provider === "claude" ? `Claude (${rewriter.model})` : `lokal: ${rewriter.model} (Ollama)`,
         provider: cfg.llm.provider,
         activeModel: rewriter.model,
-        folder: cfg.imap.folder,
+        mailboxes: pipeline.mailboxStatus(),
         seoPlugin: cfg.wp.seoPlugin,
         categories: cfg.wp.categories,
         timezone: cfg.limits.timezone,
@@ -76,7 +76,10 @@ const api = new Hono()
       },
     });
   })
-  .get("/mails", async (c) => c.json(await pipeline.listMails()))
+  .get("/mails", async (c) => {
+    const mails = await pipeline.listMails();
+    return c.json({ mails, mailboxes: pipeline.mailboxStatus() });
+  })
   .get("/mails/:uid", async (c) => c.json(await pipeline.original(uid(c))))
   .get("/mails/:uid/html", async (c) => {
     const images = c.req.query("images") === "1";

@@ -2,9 +2,10 @@
 
 import type { Config } from "./config.ts";
 import type { LogKind, Store } from "./db.ts";
+import { fingerprint, groupDuplicates, isDuplicate } from "./duplicates.ts";
 import type { ImageInfo, MailImages, VideoInfo } from "./images.ts";
 import { originalMail, renderMailHtml, type OriginalMail } from "./mail-view.ts";
-import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type ImageAttachment, type PressMail } from "./mail.ts";
+import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type ImageAttachment, type MailboxStatus, type PressMail } from "./mail.ts";
 import { cleanArticle, type Article } from "./rewrite.ts";
 
 /** Schnittstellen statt Klassen, damit die Tests Fakes einsetzen können. */
@@ -13,6 +14,7 @@ export interface Deps {
     candidates(done?: Set<string>): Promise<PressMail[]>;
     get(uid: number): Promise<PressMail | null>;
     mark(uid: number, flag: typeof DONE_FLAG | typeof SKIPPED_FLAG): Promise<void>;
+    status?(): MailboxStatus[];
   };
   wordpress: {
     postsToday(): Promise<number>;
@@ -33,6 +35,16 @@ export interface Deps {
 
 /** Höchstens so viele Mails prüft ein Vorschlags-Lauf, bevor er aufgibt (lokale Modelle sind langsam). */
 const MAX_SUGGEST_ATTEMPTS = 5;
+/** So lange merkt sich das Tool erledigte Mails, um spätere Dubletten aus anderen Postfächern zu erkennen. */
+const FINGERPRINT_DAYS = 30;
+
+export interface DuplicateInfo {
+  uid: number;
+  account: string;
+  sender: string;
+  subject: string;
+  date: string;
+}
 
 export interface MailSummary {
   uid: number;
@@ -43,6 +55,9 @@ export interface MailSummary {
   images: number;
   prefilter: boolean;
   hasDraft: boolean;
+  account: string;
+  /** dieselbe Mail aus anderen Postfächern (oder doppelt im selben) */
+  duplicates: DuplicateInfo[];
 }
 
 export interface SuggestResult {
@@ -63,6 +78,8 @@ export class Pipeline {
   private queue: Promise<unknown> = Promise.resolve();
   /** UID → Message-ID, damit Bildanfragen nicht jedes Mal das Postfach abfragen müssen */
   private keys = new Map<number, string>();
+  /** Hauptmail → ihre Dubletten aus dem letzten Abruf; werden beim Erledigen mit markiert */
+  private dupes = new Map<number, PressMail[]>();
   busy = false;
 
   constructor(private cfg: Config, private deps: Deps) {}
@@ -81,11 +98,15 @@ export class Pipeline {
     return next;
   }
 
-  /** Mail als erledigt merken: IMAP-Markierung (falls möglich) und lokale Datenbank. */
+  /** Mail samt Dubletten als erledigt merken: IMAP-Markierung (falls möglich) und lokale Datenbank. */
   private async markMail(mail: PressMail, flag: typeof DONE_FLAG | typeof SKIPPED_FLAG) {
-    this.deps.store.markProcessed(mail.messageId, flag === DONE_FLAG ? "done" : "skipped");
-    this.deps.store.deleteDraft(mail.uid);
-    await this.deps.mailbox.mark(mail.uid, flag);
+    for (const m of [mail, ...(this.dupes.get(mail.uid) ?? [])]) {
+      this.deps.store.markProcessed(m.messageId, flag === DONE_FLAG ? "done" : "skipped");
+      this.deps.store.saveFingerprint(fingerprint(m), m.subject);
+      this.deps.store.deleteDraft(m.uid);
+      await this.deps.mailbox.mark(m.uid, flag);
+    }
+    this.dupes.delete(mail.uid);
   }
 
   private log(kind: LogKind, subject = "", detail = "", link = "") {
@@ -96,10 +117,37 @@ export class Pipeline {
     return { today: await this.deps.wordpress.postsToday(), limit: this.cfg.limits.daily };
   }
 
+  mailboxStatus(): MailboxStatus[] {
+    return this.deps.mailbox.status?.() ?? [];
+  }
+
+  /**
+   * Offene Mails aller Postfächer, Dubletten zusammengefasst (nur die Hauptmail kommt zurück).
+   * Mails, die einer bereits erledigten gleichen, werden gleich mit erledigt.
+   */
   private async candidates(): Promise<PressMail[]> {
     const mails = await this.deps.mailbox.candidates(this.deps.store.processedIds());
     for (const m of mails) this.keys.set(m.uid, m.messageId);
-    return mails;
+
+    const handled = this.deps.store.fingerprints(FINGERPRINT_DAYS);
+    const open: PressMail[] = [];
+    for (const mail of mails) {
+      const print = fingerprint(mail);
+      const earlier = handled.find((h) => isDuplicate(print, h));
+      if (!earlier) {
+        open.push(mail);
+        continue;
+      }
+      this.deps.store.markProcessed(mail.messageId, "skipped");
+      this.deps.store.deleteDraft(mail.uid);
+      await this.deps.mailbox.mark(mail.uid, SKIPPED_FLAG);
+      this.log("skipped", mail.subject, `Dublette${mail.account ? ` aus ${mail.account}` : ""} – schon bearbeitet: „${earlier.subject}“`);
+    }
+
+    const drafts = this.deps.store.draftUids();
+    const groups = groupDuplicates(open, (m) => drafts.has(m.uid));
+    this.dupes = new Map(groups.filter((g) => g.duplicates.length).map((g) => [g.mail.uid, g.duplicates]));
+    return groups.map((g) => g.mail);
   }
 
   async listMails(): Promise<MailSummary[]> {
@@ -113,6 +161,8 @@ export class Pipeline {
       images: m.images.length + (m.imageUrls?.length ?? 0),
       prefilter: looksRelevant(m),
       hasDraft: drafts.has(m.uid),
+      account: m.account ?? "",
+      duplicates: (this.dupes.get(m.uid) ?? []).map((d) => ({ uid: d.uid, account: d.account ?? "", sender: d.sender, subject: d.subject, date: d.date })),
     }));
   }
 

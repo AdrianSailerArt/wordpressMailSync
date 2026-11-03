@@ -3,6 +3,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import type { Fingerprint } from "./duplicates.ts";
 import type { LlmTrace } from "./llm-events.ts";
 import { ArticleSchema, type Article } from "./rewrite.ts";
 
@@ -28,6 +29,9 @@ export class Store {
       uid INTEGER PRIMARY KEY, article TEXT NOT NULL, updated_at TEXT NOT NULL)`);
     this.db.run(`CREATE TABLE IF NOT EXISTS processed (
       message_id TEXT PRIMARY KEY, status TEXT NOT NULL, ts TEXT NOT NULL)`);
+    // Fingerabdrücke erledigter Mails – damit dieselbe Mail aus einem anderen Postfach später nicht nochmal kommt
+    this.db.run(`CREATE TABLE IF NOT EXISTS fingerprints (
+      message_id TEXT PRIMARY KEY, subject TEXT NOT NULL, subject_key TEXT NOT NULL, sketch TEXT NOT NULL, ts TEXT NOT NULL)`);
     this.db.run(`CREATE TABLE IF NOT EXISTS push_subscriptions (
       endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL, created_at TEXT NOT NULL)`);
     this.db.run("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
@@ -63,6 +67,22 @@ export class Store {
 
   processedIds(): Set<string> {
     return new Set(this.db.query<{ message_id: string }, []>("SELECT message_id FROM processed").all().map((r) => r.message_id));
+  }
+
+  saveFingerprint(print: Fingerprint, subject: string): void {
+    this.db.query("INSERT OR REPLACE INTO fingerprints (message_id, subject, subject_key, sketch, ts) VALUES (?, ?, ?, ?, ?)")
+      .run(print.messageId, subject, print.subjectKey, JSON.stringify(print.sketch), new Date().toISOString());
+  }
+
+  /** Fingerabdrücke der letzten Tage (ältere Mails kommen ohnehin nicht mehr als Kandidaten). */
+  fingerprints(days: number): (Fingerprint & { subject: string })[] {
+    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    return this.db
+      .query<{ message_id: string; subject: string; subject_key: string; sketch: string }, [string]>(
+        "SELECT message_id, subject, subject_key, sketch FROM fingerprints WHERE ts >= ?",
+      )
+      .all(since)
+      .map((r) => ({ messageId: r.message_id, subject: r.subject, subjectKey: r.subject_key, sketch: JSON.parse(r.sketch) as number[] }));
   }
 
   addSubscription(sub: { endpoint: string }): void {

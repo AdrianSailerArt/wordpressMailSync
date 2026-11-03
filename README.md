@@ -49,6 +49,19 @@ IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ─�
 9. **Merken** – erledigte Mails stehen in der lokalen Datenbank (zusätzlich IMAP-Keyword, wo
    der Server das erlaubt) – nichts wird doppelt verarbeitet.
 
+### Mehrere Postfächer und Dubletten
+
+Weitere Postfächer kommen über `IMAP_2_USER`, `IMAP_2_PASSWORD` usw. in die `.env` (siehe
+`.env.example`, bis zu 9). Fällt eins aus, laufen die anderen weiter; das Dashboard zeigt den Fehler.
+
+Dieselbe Pressemitteilung in mehreren Postfächern wird **zusammengefasst** („2× erhalten“) –
+auch wenn die Agentur sie einzeln verschickt hat (eigene Message-ID, persönliche Anrede, eigene
+Klick-Zähler). Verglichen wird der Text ohne Links; bei abweichendem Betreff müssen zusätzlich
+mindestens zwei Stichworte im Betreff übereinstimmen (meist Band und Album), damit Newsletter mit
+gleicher Vorlage nicht zusammengeworfen werden. Veröffentlichen oder Überspringen erledigt alle
+Exemplare. Kommt ein Exemplar erst später an, wird es automatisch als Dublette übersprungen
+(steht im Verlauf).
+
 ### Zeitpläne
 
 | Was | Standard | Einstellung |

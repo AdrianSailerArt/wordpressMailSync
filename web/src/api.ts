@@ -93,6 +93,16 @@ export interface MailSummary {
   images: number;
   prefilter: boolean;
   hasDraft: boolean;
+  /** Postfach, aus dem die Mail stammt */
+  account: string;
+  /** dieselbe Mail aus anderen Postfächern – zusammengefasst, wird mit erledigt */
+  duplicates: { uid: number; account: string; sender: string; subject: string; date: string }[];
+}
+
+export interface MailboxStatus {
+  name: string;
+  folder: string;
+  error?: string;
 }
 
 export interface Status {
@@ -108,7 +118,7 @@ export interface Status {
     wpUrl: string;
     wpStatus: string;
     model: string;
-    folder: string;
+    mailboxes: MailboxStatus[];
     seoPlugin: string;
     categories: string[];
     timezone: string;
@@ -168,7 +178,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 
 export const api = {
   status: () => call<Status>("GET", "/status"),
-  mails: () => call<MailSummary[]>("GET", "/mails"),
+  mails: () => call<{ mails: MailSummary[]; mailboxes: MailboxStatus[] }>("GET", "/mails"),
   log: () => call<LogEntry[]>("GET", "/log"),
   original: (uid: number) => call<OriginalMail>("GET", `/mails/${uid}`),
   originalHtmlUrl: (uid: number, images: boolean) => `/api/mails/${uid}/html${images ? "?images=1" : ""}`,

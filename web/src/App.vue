@@ -196,7 +196,7 @@ onUnmounted(() => clearInterval(timer));
         <dl class="divide-y divide-zinc-100 dark:divide-zinc-900">
           <div v-for="[k, v] in ([
             ['WordPress', `${status.config.wpUrl} · ${status.config.wpStatus}`],
-            ['IMAP-Ordner', status.config.folder],
+            [status.config.mailboxes.length > 1 ? 'Postfächer' : 'Postfach', status.config.mailboxes.map((m) => `${m.name} (${m.folder})`).join(' · ')],
             ['Vorschläge', `${status.config.suggestSchedule} (${status.config.timezone})`],
             ['Veröffentlichen', status.config.autoPublish ? `${status.schedule} (${status.config.timezone})` : 'aus (AUTO_PUBLISH=false)'],
             ['Benachrichtigungen', `${status.pushSubscribers} Browser angemeldet`],
