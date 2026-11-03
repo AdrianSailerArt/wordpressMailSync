@@ -176,7 +176,9 @@ export class Pipeline {
     });
   }
 
-  private async publishMail(mail: PressMail, article: Article): Promise<{ id: number; link: string }> {
+  private async publishMail(mail: PressMail, draft: Article): Promise<{ id: number; link: string }> {
+    // Regeln (z. B. „nicht gendern“) auch auf ältere oder von Hand bearbeitete Entwürfe anwenden
+    const article = cleanArticle(draft, this.cfg.wp.categories);
     const { featured, inline } = await this.pickImages(mail, article);
     const post = await this.deps.wordpress.createPost(article, featured, inline);
     await this.markMail(mail, DONE_FLAG);

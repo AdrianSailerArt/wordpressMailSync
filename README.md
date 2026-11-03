@@ -28,7 +28,7 @@ IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ─�
 2. **Mails holen** – alle unbearbeiteten Mails der letzten `MAX_AGE_DAYS` Tage, neueste
    zuerst. Der Gelesen-Status bleibt unverändert.
 3. **Vorfilter** – Mails ohne Musik-Stichworte werden ohne KI-Aufruf übersprungen.
-4. **Sprachmodell, Stufe 1** – strenge Prüfung „Geht es um konkrete Musiker:innen, Bands oder
+4. **Sprachmodell, Stufe 1** – strenge Prüfung „Geht es um konkrete Musiker, Bands oder
    Festivals?“ (≈ 10 s). Technik-, Wirtschafts- und Startup-Meldungen fliegen hier raus.
 5. **Sprachmodell, Stufe 2** – schreibt den Beitrag nach dem
    [Stil-Regelwerk](stil/regelwerk.md): Titel im Hausformat, SEO-Titel, Meta-Description,

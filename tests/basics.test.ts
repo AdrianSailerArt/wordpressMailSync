@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ImageStore } from "../server/images.ts";
 import { extractImageLinks, looksRelevant, parseMessage, type PressMail } from "../server/mail.ts";
-import { ArticleSchema, cleanArticle, slugify, tidyContent } from "../server/rewrite.ts";
+import { ArticleSchema, cleanArticle, degender, slugify, tidyContent } from "../server/rewrite.ts";
 
 function rawMail(subject: string, html: string, image?: Buffer): Buffer {
   const boundary = "XYZ";
@@ -54,6 +54,25 @@ describe("Mail", () => {
 });
 
 describe("Artikel", () => {
+  test("wir gendern nicht: Gender-Schreibweisen werden zum generischen Maskulinum", () => {
+    const cases: [string, string][] = [
+      ["Alle Künstler:innen und Musiker*innen", "Alle Künstler und Musiker"],
+      ["Die BesucherInnen und Fan:innen feiern", "Die Besucher und Fans feiern"],
+      ["Liebe Leser_innen, Kolleg:innen und Journalist/-innen", "Liebe Leser, Kollegen und Journalisten"],
+      ["Sängerinnen und Sänger aus ganz Europa", "Sänger aus ganz Europa"],
+      ["Gitarristen und Gitarristinnen gesucht", "Gitarristen gesucht"],
+      ["Unser Redakteur:in schreibt", "Unser Redakteur schreibt"],
+      ["Die Sängerin Mara Holt und der Gitarrist", "Die Sängerin Mara Holt und der Gitarrist"],
+      ["Mehr auf LinkedIn und Berlin, Termine um 20:00 Uhr", "Mehr auf LinkedIn und Berlin, Termine um 20:00 Uhr"],
+    ];
+    for (const [input, expected] of cases) expect(degender(input)).toBe(expected);
+  });
+
+  test("Gendern im HTML: nur Text, Links bleiben unverändert", () => {
+    expect(tidyContent('<p>Für alle Fan:innen: <a href="https://x.example/fan:innen">Tickets</a></p>'))
+      .toBe('<p>Für alle Fans: <a href="https://x.example/fan:innen">Tickets</a></p>');
+  });
+
   test("Formfehler lokaler Modelle werden bereinigt", () => {
     expect(tidyContent("<h2>Überschrift</h2><p>Die Band **ANKOR** spielt am 1.04.2027 und 12.03.2027.</p><h2>Termine</h2>"))
       .toBe("<p>Die Band <strong>ANKOR</strong> spielt am 01.04.2027 und 12.03.2027.</p><h2>Termine</h2>");

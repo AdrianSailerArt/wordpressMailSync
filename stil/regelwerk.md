@@ -5,8 +5,12 @@ Festival-Ankündigungen 2025/2026). Gilt für jeden automatisch erstellten Beitr
 
 ## Stimme und Haltung
 
-- Wir schreiben als Redaktion in der **Wir-Form** und sprechen die Leser:innen mit
+- Wir schreiben als Redaktion in der **Wir-Form** und sprechen die Leser mit
   **„ihr/euch“** an („Tickets bekommt ihr …“). Niemals „Sie“ – auch wenn die Pressemitteilung siezt.
+- **Wir gendern nicht.** Keine Genderzeichen (Doppelpunkt, Sternchen, Unterstrich, Binnen-I)
+  und keine Doppelnennungen („Sängerinnen und Sänger“). Wir verwenden das generische
+  Maskulinum: Leser, Fans, Musiker, Künstler, Besucher, Veranstalter. Ist eine konkrete Person
+  gemeint, steht die passende Form („die Sängerin“, „der Gitarrist“).
 - Ton: begeistert, nahbar, szenenah – wie Fans, die selbst auf Konzerte gehen. Keine Werbesprache,
   kein PR-Deutsch („exklusives Erlebnis der Extraklasse“, „Seien Sie dabei“).
 - Szene-Vokabular ist erwünscht, wo es passt: Line-up, Headliner, Support, Billing, Platte,
