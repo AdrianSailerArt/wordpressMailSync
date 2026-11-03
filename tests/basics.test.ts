@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ImageStore } from "../server/images.ts";
 import { extractImageLinks, looksRelevant, parseMessage, youtubeId, type PressMail } from "../server/mail.ts";
-import { ArticleSchema, cleanArticle, degender, isBlockedLink, slugify, stripPressLinks, tidyContent } from "../server/rewrite.ts";
+import { ArticleSchema, cleanArticle, degender, isBlockedLink, slugify, stripBlockedUrls, stripPressLinks, tidyContent } from "../server/rewrite.ts";
 import { insertAfterParagraph, videoHtml } from "../server/wordpress.ts";
 
 function rawMail(subject: string, html: string, image?: Buffer): Buffer {
@@ -199,6 +199,19 @@ describe("Links und Videos", () => {
       `<ul><li>Hörprobe: <a href="https://soundcloud.com/b/s/s-AbC123">privat</a></li><li>12.03.2027 – Köln – Gloria</li></ul>`);
     expect(out).toBe(`<p>Das Album erscheint über <a href="https://label.example/shop">Napalm Records</a>, Fotos im Presseordner.</p>` +
       `<p>Das Video zu „Anfang“ ist online.</p><ul><li>12.03.2027 – Köln – Gloria</li></ul>`);
+  });
+
+  test("Presse-Plattformen und persönliche Verteiler-Links: auch als nackte URL in eckigen Klammern", () => {
+    const promo = "https://www.promojukebox.com/mlgdel/?e=ZkxSa1BNUjNn%3D&c=57075222&p=THVJWARUHMA6LX49&checkcode=d597f56802e8295c&urlcc=f471a0c418a8acdb&acc=SzBpWUU5VE9q";
+    expect(isBlockedLink(promo)).toBe(true);
+    expect(isBlockedLink("https://www.promojukebox.com/", "Website")).toBe(true);
+    expect(isBlockedLink(`https://tickets.example/band?${"x".repeat(120)}`)).toBe(true);
+    expect(isBlockedLink("https://tickets.example/band?date=2027-03-12", "Tickets")).toBe(false);
+
+    expect(stripPressLinks(`<p>Infos &amp; Tickets: [${promo}]</p><p>Mehr unter [https://band.example] und bald live.</p>`))
+      .toBe(`<p>Mehr unter [https://band.example] und bald live.</p>`);
+    expect(stripBlockedUrls(`Stream: Hier hören [${promo}]\nWebsite [https://band.example]`))
+      .toBe("Stream: Hier hören \nWebsite [https://band.example]");
   });
 
   test("Video wird cookiefrei eingebunden: eigenes Vorschaubild mit Link, kein Player, keine nackte URL", () => {

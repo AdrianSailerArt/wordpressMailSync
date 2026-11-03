@@ -151,15 +151,23 @@ const degenderHtml = (html: string) => html.split(/(<[^>]+>)/).map((part) => (pa
 const plain = (s: string) => degender(s).replace(/\*\*(.+?)\*\*/g, "$1").replace(/(^|\s)\*(\S.*?)\*(?=[\s.,;:!?)]|$)/g, "$1$2").replace(/\s+/g, " ").trim();
 
 /** Ziele, die nie in einen Artikel gehören: Download-Dienste, Presseordner, private Hörproben, Dateien. */
-const BLOCKED_HOST = /(^|\.)(wetransfer\.com|we\.tl|dropbox\.com|db\.tt|drive\.google\.com|docs\.google\.com|box\.com|mega\.nz|1drv\.ms|onedrive\.live\.com|sharepoint\.com|icloud\.com|sendspace\.com|filemail\.com|transfernow\.net|fromsmash\.com|swisstransfer\.com|haulix\.com|promoreel\.com|label-worx\.com|music-promo\.\w+)$/i;
+const BLOCKED_HOST = /(^|\.)(wetransfer\.com|we\.tl|dropbox\.com|db\.tt|drive\.google\.com|docs\.google\.com|box\.com|mega\.nz|1drv\.ms|onedrive\.live\.com|sharepoint\.com|icloud\.com|sendspace\.com|filemail\.com|transfernow\.net|fromsmash\.com|swisstransfer\.com|haulix\.com|promoreel\.com|label-worx\.com|music-promo\.\w+|promojukebox\.\w+|presskit\.to|musicpromo\.\w+)$/i;
 const BLOCKED_PATH = /\.(zip|rar|7z|wav|mp3|flac|aiff?|pdf)$|^\/(presse|press|pressebereich|presskit|press-kit|epk|download|downloads|promo)(\/|$)/i;
 const BLOCKED_TEXT = /download|herunterladen|presse-?(fotos?|bilder?|material|kit|bereich|ordner|mappe)|press ?(kit|area|photos?)|\bepk\b|hörprobe|vorab-?stream|promo-?(link|stream)|private[rn]? stream|listening link/i;
+
+/**
+ * Persönliche Links aus dem Presseverteiler: lange verschlüsselte Parameter (Empfänger-Kennung,
+ * Prüfcodes). Sie sind nur für den Empfänger gedacht und verraten, wer geklickt hat.
+ */
+function isPersonalLink(url: URL): boolean {
+  return url.search.length > 100 || /[?&](checkcode|urlcc|acc|subscriber|recipient|uid|mc_eid)=/i.test(url.search);
+}
 
 export function isBlockedLink(href: string, text = ""): boolean {
   if (BLOCKED_TEXT.test(text)) return true;
   try {
     const url = new URL(href);
-    if (BLOCKED_HOST.test(url.hostname) || BLOCKED_PATH.test(url.pathname)) return true;
+    if (BLOCKED_HOST.test(url.hostname) || BLOCKED_PATH.test(url.pathname) || isPersonalLink(url)) return true;
     // private SoundCloud-Links (Hörproben) haben ein geheimes Token „/s-…“
     if (/soundcloud\.com$/i.test(url.hostname) && /\/s-[A-Za-z0-9]+/.test(url.pathname)) return true;
     return false;
@@ -184,7 +192,8 @@ export function stripPressLinks(html: string): string {
       if (youtubeId(href)) return /^https?:\/\//.test(label) ? `${MARK}${MARK}` : text;
       return m;
     })
-    .replace(/(^|[\s>(])(https?:\/\/[^\s<>"')]+)/g, (m, pre: string, url: string) =>
+    // nackte URLs im Text, auch in eckigen Klammern wie sie html-to-text schreibt: „Tickets: [https://…]“
+    .replace(/(^|[\s>(])\[?(https?:\/\/[^\s<>"'\])]+)\]?/g, (m, pre: string, url: string) =>
       isBlockedLink(url) || youtubeId(url) ? `${pre}${MARK}${MARK}` : m);
 
   return marked.replace(/<(p|li)\b[^>]*>([\s\S]*?)<\/\1>/gi, (block, _tag, inner: string) => {
@@ -194,6 +203,14 @@ export function stripPressLinks(html: string): string {
     if (rest.replace(/[\s:.,–-]+/g, " ").trim().length < 30 || BLOCKED_TEXT.test(rest)) return "";
     return block.replaceAll(MARK, "").replace(/\s+([.,;:!?])/g, "$1");
   }).replaceAll(MARK, "");
+}
+
+/**
+ * Gesperrte Links schon aus der Mail entfernen, bevor das Modell sie sieht – was es nicht kennt,
+ * kann es nicht abschreiben. html-to-text schreibt Links als „Text [URL]“.
+ */
+export function stripBlockedUrls(text: string): string {
+  return text.replace(/\[?(https?:\/\/[^\s<>"'\]]+)\]?/g, (m, url: string) => (isBlockedLink(url) ? "" : m));
 }
 
 /** Typische Formfehler im Beitragstext beheben, bevor das HTML gefiltert wird. */
@@ -376,7 +393,7 @@ export class Rewriter {
     const model = this.model; // während eines Durchlaufs nicht wechseln
     const user =
       `Betreff: ${mail.subject}\nVon: ${mail.sender}\nDatum: ${mail.date}\n` +
-      `Anhänge mit Bildern: ${mail.images.length}\n\n<email>\n${mail.body}\n</email>`;
+      `Anhänge mit Bildern: ${mail.images.length}\n\n<email>\n${stripBlockedUrls(mail.body)}\n</email>`;
     let result: Article = ArticleSchema.parse({ relevant: false, reason: "Abgebrochen", generated_by: model });
     try {
       // Stufe 1: Ist das überhaupt Musik? (Anfang der Mail reicht und ist schnell)

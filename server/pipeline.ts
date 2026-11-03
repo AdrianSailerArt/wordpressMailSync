@@ -169,7 +169,8 @@ export class Pipeline {
   /** Entwurf aus dem Cache oder frisch von Claude. */
   private async draftFor(mail: PressMail, refresh = false): Promise<Article> {
     const cached = refresh ? null : this.deps.store.getDraft(mail.uid);
-    if (cached) return cached;
+    // Regeln (Link-Filter, nicht gendern …) auch auf ältere Entwürfe anwenden
+    if (cached) return cleanArticle(cached, this.cfg.wp.categories);
     const article = await this.deps.rewriter.rewrite(mail);
     this.deps.store.saveDraft(mail.uid, article);
     return article;
