@@ -111,9 +111,17 @@ sh scripts/autostart-macos.sh --remove   # wieder entfernen
 | `bun run dev` | Entwicklung mit Hot-Reload (Dashboard auf :5173) |
 | `bun test` · `bun run typecheck` | Tests und Typprüfung |
 
-## Anderes Modell
+## Modell wechseln und zuschauen
 
-- Anderes lokales Modell: `OLLAMA_MODEL=…` (z. B. `gemma3:4b` – schneller, schwächer).
+- **Einstellungen → Sprachmodell** listet alle in Ollama installierten Modelle (Größe,
+  Quantisierung, ob gerade geladen, Warnung bei zu wenig Arbeitsspeicher). Ein Klick schaltet
+  um, die Wahl gilt ab dem nächsten Entwurf und bleibt gespeichert. `OLLAMA_MODEL` ist nur
+  der Standard.
+- Während ein Entwurf entsteht, zeigt das Dashboard **live**, was das Modell schreibt (Stufe,
+  Zeichen, Zeit) – auch bei Läufen aus dem Zeitplan. In der Kopfzeile steht dann „schreibt …“.
+- Reiter **KI** im Editor: das Protokoll beider Stufen mit Anweisung, Eingabe, Rohantwort,
+  Dauer, Tokens und Geschwindigkeit. Jeder Entwurf merkt sich, welches Modell ihn geschrieben hat.
+- Erfahrung: `gemma3:4b` ist nicht schneller fertig als `gemma4` und schreibt teils auf Englisch.
 - Claude statt lokal: `LLM_PROVIDER=claude` und `ANTHROPIC_API_KEY` setzen.
 
 ## Stil-Regelwerk
@@ -126,8 +134,8 @@ den Server neu starten; anderer Pfad über `STYLE_FILE`.
 ## Projektstruktur
 
 ```
-server/      Bun-Backend: config, mail (IMAP), images (Bilder), rewrite (Ollama/Claude), wordpress,
-             pipeline, push (Benachrichtigungen), db, index (API + Zeitpläne), cli, demo
+server/      Bun-Backend: config, mail (IMAP), images (Bilder), rewrite (Ollama/Claude), llm-events
+             (Live-Ausgabe/Protokoll), wordpress, pipeline, push, db, index (API + Zeitpläne), cli, demo
 stil/        Stil-Regelwerk der Redaktion
 web/         Vue-3-Dashboard (Vite, Tailwind) inkl. Service Worker für Push
 tests/       bun test

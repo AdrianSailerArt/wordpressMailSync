@@ -3,6 +3,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import type { LlmTrace } from "./llm-events.ts";
 import { ArticleSchema, type Article } from "./rewrite.ts";
 
 export type LogKind = "published" | "suggested" | "skipped" | "error" | "run";
@@ -29,6 +30,8 @@ export class Store {
       message_id TEXT PRIMARY KEY, status TEXT NOT NULL, ts TEXT NOT NULL)`);
     this.db.run(`CREATE TABLE IF NOT EXISTS push_subscriptions (
       endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL, created_at TEXT NOT NULL)`);
+    this.db.run("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    this.db.run("CREATE TABLE IF NOT EXISTS traces (uid INTEGER PRIMARY KEY, trace TEXT NOT NULL, updated_at TEXT NOT NULL)");
     this.db.run(`CREATE TABLE IF NOT EXISTS log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, kind TEXT NOT NULL,
       subject TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '')`);
@@ -74,6 +77,25 @@ export class Store {
   subscriptions<T>(): T[] {
     return this.db.query<{ subscription: string }, []>("SELECT subscription FROM push_subscriptions").all()
       .map((r) => JSON.parse(r.subscription) as T);
+  }
+
+  getSetting(key: string): string | null {
+    return this.db.query<{ value: string }, [string]>("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, value);
+  }
+
+  /** KI-Protokoll des letzten Durchlaufs einer Mail */
+  saveTrace(trace: LlmTrace): void {
+    this.db.query("INSERT OR REPLACE INTO traces (uid, trace, updated_at) VALUES (?, ?, ?)")
+      .run(trace.uid, JSON.stringify(trace), new Date().toISOString());
+  }
+
+  getTrace(uid: number): LlmTrace | null {
+    const row = this.db.query<{ trace: string }, [number]>("SELECT trace FROM traces WHERE uid = ?").get(uid);
+    return row ? (JSON.parse(row.trace) as LlmTrace) : null;
   }
 
   log(kind: LogKind, subject = "", detail = "", link = ""): void {

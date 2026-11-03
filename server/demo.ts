@@ -1,6 +1,7 @@
 /** Demo-Modus (DEMO=1): Beispiel-Mails und ein simuliertes WordPress, kein Netzwerkzugriff. */
 
 import type { Store } from "./db.ts";
+import type { LlmEvents, LlmTrace } from "./llm-events.ts";
 import type { PressMail } from "./mail.ts";
 import type { Deps } from "./pipeline.ts";
 import { cleanArticle, type Article } from "./rewrite.ts";
@@ -30,6 +31,7 @@ function fakeArticle(mail: PressMail): Article {
     featured_image: "",
     inline_images: [],
     seo_title: "",
+    generated_by: "demo",
     title: tour ? "Nordlicht Kollektiv: „Weite“ Tour 2027 – alle Termine" : "Mira Sol: Neue Single „Glas“ erscheint am 14.11.",
     slug: tour ? "nordlicht-kollektiv-weite-tour-2027" : "mira-sol-single-glas",
     focus_keyword: tour ? "Nordlicht Kollektiv Tour 2027" : "Mira Sol Glas",
@@ -49,7 +51,26 @@ function fakeArticle(mail: PressMail): Article {
   }, ["News", "Events"]);
 }
 
-export function demoDeps(store: Store): Deps {
+/** Demo-„Modell“: gibt die vorbereitete Antwort stückweise aus, damit die Live-Ansicht etwas zeigt. */
+async function streamDemo(events: LlmEvents | undefined, onTrace: (t: LlmTrace) => void, mail: PressMail, article: Article) {
+  const model = "demo";
+  const check = JSON.stringify({ artist: article.relevant ? article.title.split(":")[0] : "", music_news: article.relevant, reason: article.reason });
+  const write = JSON.stringify(Object.fromEntries(Object.entries(article).filter(([k]) => !["featured_image", "inline_images", "generated_by"].includes(k))), null, 2);
+  for (const [stage, raw] of [["check", check], ["write", write]] as const) {
+    if (stage === "write" && !article.relevant) break;
+    events?.emit({ type: "start", uid: mail.uid, stage, model, system: "(Demo-Anweisung)", user: mail.body, at: new Date().toISOString() });
+    const started = Date.now();
+    for (let i = 0; i < raw.length; i += 12) {
+      events?.emit({ type: "token", uid: mail.uid, stage, text: raw.slice(i, i + 12) });
+      await Bun.sleep(15);
+    }
+    const ms = Date.now() - started;
+    events?.emit({ type: "end", uid: mail.uid, stage, raw, stats: { ms, outputTokens: Math.round(raw.length / 4), tokensPerSec: Math.round(raw.length / 4 / (ms / 1000)) } });
+  }
+  events?.emit({ type: "result", uid: mail.uid, relevant: article.relevant, reason: article.reason, model }, onTrace);
+}
+
+export function demoDeps(store: Store, events?: LlmEvents): Deps {
   const mails = new Map(MAILS.map((m) => [m.uid, m]));
   let postsToday = 1;
   return {
@@ -65,8 +86,9 @@ export function demoDeps(store: Store): Deps {
     },
     rewriter: {
       rewrite: async (mail) => {
-        await Bun.sleep(1200);
-        return mail.uid === 103 ? { ...fakeArticle(mail), relevant: false, reason: "Rechnung, keine Pressemitteilung" } : fakeArticle(mail);
+        const article = mail.uid === 103 ? { ...fakeArticle(mail), relevant: false, reason: "Rechnung, keine Pressemitteilung" } : fakeArticle(mail);
+        await streamDemo(events, (t) => store.saveTrace(t), mail, article);
+        return article;
       },
     },
     images: {

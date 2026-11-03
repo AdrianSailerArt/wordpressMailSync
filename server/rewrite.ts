@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import sanitizeHtml from "sanitize-html";
 import { z } from "zod";
 import type { Config } from "./config.ts";
+import type { LlmEvents, LlmStage, LlmStats, LlmTrace } from "./llm-events.ts";
 import type { PressMail } from "./mail.ts";
 
 const ALLOWED_TAGS = ["h2", "h3", "p", "ul", "ol", "li", "strong", "em", "a", "br",
@@ -90,12 +91,14 @@ export const ArticleSchema = z.object({
   // featured_image: "" = automatisch (größtes Bild), "none" = kein Beitragsbild, sonst Bild-ID
   featured_image: z.string().default(""),
   inline_images: z.array(z.string()).default([]),
+  // welches Modell den Entwurf geschrieben hat
+  generated_by: z.string().default(""),
 });
 
 export type Article = z.infer<typeof ArticleSchema>;
 
 const FIELDS = (Object.keys(ArticleSchema.shape) as (keyof Article)[])
-  .filter((k) => k !== "featured_image" && k !== "inline_images");
+  .filter((k) => k !== "featured_image" && k !== "inline_images" && k !== "generated_by");
 const JSON_SCHEMA = {
   type: "object",
   properties: Object.fromEntries(
@@ -177,16 +180,24 @@ export function cleanArticle(article: Article, categories: string[]): Article {
   };
 }
 
-/** Rohes JSON vom Sprachmodell holen – lokal über Ollama oder über die Claude-API. */
-async function generateOllama(cfg: Config["llm"], system: string, user: string, schema: object): Promise<string> {
+interface Generated {
+  raw: string | null;
+  stats: LlmStats;
+}
+
+/** Rohes JSON von Ollama holen – gestreamt, damit das Dashboard live mitlesen kann. */
+async function generateOllama(
+  cfg: Config["llm"], model: string, system: string, user: string, schema: object, onToken: (t: string) => void,
+): Promise<Generated> {
+  const started = Date.now();
   const res = await fetch(`${cfg.ollamaUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: cfg.ollamaModel,
+      model,
       messages: [{ role: "system", content: system }, { role: "user", content: user }],
       format: schema, // erzwingt gültiges JSON nach Schema
-      stream: false,
+      stream: true,
       think: false,
       keep_alive: "10m",
       options: { temperature: 0.4, num_ctx: 16384 },
@@ -196,12 +207,47 @@ async function generateOllama(cfg: Config["llm"], system: string, user: string, 
     throw new Error(`Ollama nicht erreichbar unter ${cfg.ollamaUrl} – läuft die Ollama-App? (${err})`);
   });
   if (!res.ok) throw new Error(`Ollama: ${res.status} ${(await res.text()).slice(0, 300)}`);
-  const data = (await res.json()) as { message?: { content?: string } };
-  if (!data.message?.content) throw new Error("Leere Antwort von Ollama");
-  return data.message.content;
+  if (!res.body) throw new Error("Leere Antwort von Ollama");
+
+  // Antwort kommt als eine JSON-Zeile pro Textstück, die letzte enthält die Messwerte
+  let raw = "";
+  let buffer = "";
+  let final: { prompt_eval_count?: number; eval_count?: number; eval_duration?: number; error?: string } = {};
+  const handleLine = (line: string) => {
+    if (!line.trim()) return;
+    const msg = JSON.parse(line) as { message?: { content?: string }; done?: boolean; error?: string } & typeof final;
+    if (msg.error) throw new Error(`Ollama: ${msg.error}`);
+    const text = msg.message?.content ?? "";
+    if (text) {
+      raw += text;
+      onToken(text);
+    }
+    if (msg.done) final = msg;
+  };
+  const decoder = new TextDecoder();
+  for await (const chunk of res.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) !== -1) {
+      handleLine(buffer.slice(0, nl));
+      buffer = buffer.slice(nl + 1);
+    }
+  }
+  handleLine(buffer + decoder.decode()); // letzte Zeile ohne abschließenden Zeilenumbruch
+  if (!raw) throw new Error("Leere Antwort von Ollama");
+  return {
+    raw,
+    stats: {
+      ms: Date.now() - started,
+      promptTokens: final.prompt_eval_count,
+      outputTokens: final.eval_count,
+      tokensPerSec: final.eval_count && final.eval_duration ? Math.round((final.eval_count / final.eval_duration) * 1e10) / 10 : undefined,
+    },
+  };
 }
 
-async function generateClaude(cfg: Config["llm"], system: string, user: string, schema: object): Promise<string | null> {
+async function generateClaude(cfg: Config["llm"], system: string, user: string, schema: object): Promise<Generated> {
+  const started = Date.now();
   const client = new Anthropic();
   const response = await client.beta.messages.create({
     model: cfg.claudeModel,
@@ -213,11 +259,12 @@ async function generateClaude(cfg: Config["llm"], system: string, user: string, 
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
   });
-  if (response.stop_reason === "refusal") return null;
+  const stats = { ms: Date.now() - started, promptTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
+  if (response.stop_reason === "refusal") return { raw: null, stats };
   if (response.stop_reason === "max_tokens") throw new Error("Antwort von Claude wurde abgeschnitten (max_tokens)");
   const text = response.content.find((b) => b.type === "text");
   if (!text || text.type !== "text") throw new Error("Keine Textantwort von Claude");
-  return text.text;
+  return { raw: text.text, stats };
 }
 
 /** Stil-Regelwerk der Redaktion (Markdown), wird an die Schreib-Anweisung angehängt. */
@@ -226,26 +273,49 @@ export function loadStyleGuide(path: string): string {
   return `\n\n# Stil-Regelwerk der Redaktion – verbindlich\n\n${readFileSync(path, "utf8").trim()}\n`;
 }
 
+export interface RewriterOptions {
+  /** aktuell gewähltes lokales Modell (im Dashboard umschaltbar) */
+  model?: () => string;
+  events?: LlmEvents;
+  /** wird mit dem vollständigen KI-Protokoll aufgerufen, sobald eine Mail fertig ist */
+  onTrace?: (trace: LlmTrace) => void;
+}
+
 export class Rewriter {
   private system: string;
 
-  constructor(private cfg: Config["llm"], private categories: string[]) {
+  constructor(private cfg: Config["llm"], private categories: string[], private opts: RewriterOptions = {}) {
     this.system = SYSTEM_PROMPT.replace("{siteName}", cfg.siteName)
       .replace("{siteTone}", cfg.siteTone)
       .replace("{categories}", categories.join(", ")) + loadStyleGuide(cfg.styleFile);
   }
 
+  get model(): string {
+    return this.cfg.provider === "claude" ? this.cfg.claudeModel : this.opts.model?.() || this.cfg.ollamaModel;
+  }
+
   /** JSON vom Modell holen; lokale Modelle liefern gelegentlich Unbrauchbares – dann einmal neu versuchen. */
-  private async ask<T>(system: string, user: string, schema: object, parse: (raw: unknown) => T): Promise<T | null> {
+  private async ask<T>(
+    uid: number, stage: LlmStage, model: string, system: string, user: string, schema: object, parse: (raw: unknown) => T,
+  ): Promise<T | null> {
+    const events = this.opts.events;
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
+      events?.emit({ type: "start", uid, stage, model, system, user, at: new Date().toISOString() });
+      const started = Date.now();
+      let streamed = "";
       try {
-        const raw = this.cfg.provider === "claude"
+        const { raw, stats } = this.cfg.provider === "claude"
           ? await generateClaude(this.cfg, system, user, schema)
-          : await generateOllama(this.cfg, system, user, schema);
+          : await generateOllama(this.cfg, model, system, user, schema, (text) => {
+              streamed += text;
+              events?.emit({ type: "token", uid, stage, text });
+            });
+        events?.emit({ type: "end", uid, stage, raw: raw ?? "(abgelehnt)", stats });
         return raw === null ? null : parse(JSON.parse(raw));
       } catch (err) {
         lastError = err;
+        events?.emit({ type: "end", uid, stage, raw: streamed, stats: { ms: Date.now() - started }, error: String(err) });
         if (!(err instanceof SyntaxError || err instanceof z.ZodError)) throw err;
       }
     }
@@ -253,21 +323,32 @@ export class Rewriter {
   }
 
   async rewrite(mail: PressMail): Promise<Article> {
+    const model = this.model; // während eines Durchlaufs nicht wechseln
     const user =
       `Betreff: ${mail.subject}\nVon: ${mail.sender}\nDatum: ${mail.date}\n` +
       `Anhänge mit Bildern: ${mail.images.length}\n\n<email>\n${mail.body}\n</email>`;
-
-    // Stufe 1: Ist das überhaupt Musik? (Anfang der Mail reicht und ist schnell)
-    const check = await this.ask(CLASSIFY_PROMPT, user.slice(0, 6000), CLASSIFY_SCHEMA, (r) =>
-      z.object({ artist: z.string(), music_news: z.boolean(), reason: z.string() }).parse(r));
-    if (check === null) return ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt" });
-    if (!check.music_news || !check.artist.trim()) {
-      return ArticleSchema.parse({ relevant: false, reason: `Keine Musik-News: ${check.reason}` });
+    let result: Article = ArticleSchema.parse({ relevant: false, reason: "Abgebrochen", generated_by: model });
+    try {
+      // Stufe 1: Ist das überhaupt Musik? (Anfang der Mail reicht und ist schnell)
+      const check = await this.ask(mail.uid, "check", model, CLASSIFY_PROMPT, user.slice(0, 6000), CLASSIFY_SCHEMA, (r) =>
+        z.object({ artist: z.string(), music_news: z.boolean(), reason: z.string() }).parse(r));
+      if (check === null) {
+        result = ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt", generated_by: model });
+      } else if (!check.music_news || !check.artist.trim()) {
+        result = ArticleSchema.parse({ relevant: false, reason: `Keine Musik-News: ${check.reason}`, generated_by: model });
+      } else {
+        // Stufe 2: Beitrag schreiben
+        const article = await this.ask(mail.uid, "write", model, this.system, user, JSON_SCHEMA, (r) => ArticleSchema.parse(r));
+        result = article === null
+          ? ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt", generated_by: model })
+          : { ...cleanArticle(article, this.categories), generated_by: model };
+      }
+      return result;
+    } catch (err) {
+      result = { ...result, reason: `Fehler: ${err instanceof Error ? err.message : String(err)}` };
+      throw err;
+    } finally {
+      this.opts.events?.emit({ type: "result", uid: mail.uid, relevant: result.relevant, reason: result.reason, model }, this.opts.onTrace);
     }
-
-    // Stufe 2: Beitrag schreiben
-    const article = await this.ask(this.system, user, JSON_SCHEMA, (r) => ArticleSchema.parse(r));
-    if (article === null) return ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt" });
-    return cleanArticle(article, this.categories);
   }
 }

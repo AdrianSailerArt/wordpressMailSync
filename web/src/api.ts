@@ -16,6 +16,46 @@ export interface Article {
   /** "" = automatisch (größtes Bild), "none" = kein Beitragsbild, sonst Bild-ID */
   featured_image: string;
   inline_images: string[];
+  generated_by: string;
+}
+
+export interface LlmModel {
+  name: string;
+  sizeGB: number;
+  params: string;
+  quantization: string;
+  family: string;
+  loaded: boolean;
+  tooBig: boolean;
+}
+
+export interface ModelsResponse {
+  provider: "ollama" | "claude";
+  current: string;
+  ramGB: number;
+  models: LlmModel[];
+  error?: string;
+}
+
+export type LlmStage = "check" | "write";
+
+export interface TraceStage {
+  stage: LlmStage;
+  model: string;
+  system: string;
+  user: string;
+  at: string;
+  raw: string;
+  stats?: { ms: number; promptTokens?: number; outputTokens?: number; tokensPerSec?: number };
+  error?: string;
+}
+
+export interface LlmTrace {
+  uid: number;
+  model: string;
+  relevant: boolean | null;
+  reason: string;
+  stages: TraceStage[];
 }
 
 export interface ImageInfo {
@@ -64,6 +104,8 @@ export interface Status {
     timezone: string;
     perRun: number;
     autoPublish: boolean;
+    provider: "ollama" | "claude";
+    activeModel: string;
     suggestSchedule: string;
   };
 }
@@ -117,6 +159,9 @@ export const api = {
   images: (uid: number) => call<MailImages>("GET", `/mails/${uid}/images`),
   imageUrl: (uid: number, id: string) => `/api/mails/${uid}/images/${id}`,
   testPush: () => call<{ ok: true }>("POST", "/push/test"),
+  models: () => call<ModelsResponse>("GET", "/llm/models"),
+  setModel: (model: string) => call<{ current: string }>("PUT", "/llm/model", { model }),
+  trace: (uid: number) => call<LlmTrace | null>("GET", `/mails/${uid}/trace`),
 };
 
 export const formatDate = (iso: string | null) =>

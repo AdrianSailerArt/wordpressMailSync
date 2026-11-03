@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { api, formatDate, type RunResult, type Status } from "./api";
 import { disablePush, enablePush, onOpenRequest, pushState, type PushState } from "./push";
 import InboxView from "./components/InboxView.vue";
+import ModelPicker from "./components/ModelPicker.vue";
+import { connectLive, live, stageLabel } from "./llm";
 import LogList from "./components/LogList.vue";
 
 type Tab = "inbox" | "log" | "settings";
@@ -18,6 +20,8 @@ const error = ref("");
 const running = ref(false);
 const runResult = ref<RunResult | null>(null);
 const refreshKey = ref(0);
+/** irgendein laufender Modell-Durchlauf (z. B. vom Zeitplan) – für die Anzeige in der Kopfzeile */
+const activeRun = computed(() => Object.values(live.runs)[0] ?? null);
 const push = ref<PushState>("off");
 const suggesting = ref(false);
 /** Mail, die per Benachrichtigung oder ?mail= geöffnet werden soll */
@@ -85,6 +89,7 @@ const onChanged = loadStatus;
 let timer: ReturnType<typeof setInterval>;
 onMounted(() => {
   loadStatus();
+  connectLive();
   pushState().then((s) => (push.value = s));
   onOpenRequest(openFromUrl);
   if (openUid.value) history.replaceState(null, "", "/");
@@ -106,6 +111,19 @@ onUnmounted(() => clearInterval(timer));
           <dt class="text-zinc-500">Heute</dt>
           <dd class="font-medium tabular-nums" :class="status.today >= status.limit && 'text-amber-600 dark:text-amber-400'">
             {{ status.today }} / {{ status.limit }}
+          </dd>
+        </div>
+        <div>
+          <dt class="text-zinc-500">Modell</dt>
+          <dd>
+            <button
+              class="flex items-center gap-1.5 font-medium hover:underline"
+              :title="activeRun ? `${stageLabel(activeRun.stage)} – klicken zum Ansehen` : 'Modell wechseln'"
+              @click="activeRun ? openFromUrl(`/?mail=${activeRun.uid}`) : (tab = 'settings')"
+            >
+              <span v-if="activeRun" class="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+              {{ status.config.activeModel }}<span v-if="activeRun" class="font-normal text-zinc-500">schreibt …</span>
+            </button>
           </dd>
         </div>
         <div>
@@ -171,7 +189,10 @@ onUnmounted(() => clearInterval(timer));
       <InboxView v-if="tab === 'inbox'" :key="'inbox' + refreshKey" :status="status" :open-uid="openUid" @changed="onChanged" @opened="openUid = null" />
       <LogList v-else-if="tab === 'log'" :key="'log' + refreshKey" />
       <section v-else-if="status" class="max-w-xl text-sm">
-        <p class="mb-6 text-zinc-500">Werte aus der <code class="font-mono text-xs">.env</code> des Servers.</p>
+        <h2 class="eyebrow mb-3">Sprachmodell</h2>
+        <ModelPicker class="mb-10" @changed="loadStatus" />
+        <h2 class="eyebrow mb-3">Konfiguration</h2>
+        <p class="mb-4 text-zinc-500">Werte aus der <code class="font-mono text-xs">.env</code> des Servers.</p>
         <dl class="divide-y divide-zinc-100 dark:divide-zinc-900">
           <div v-for="[k, v] in ([
             ['WordPress', `${status.config.wpUrl} · ${status.config.wpStatus}`],

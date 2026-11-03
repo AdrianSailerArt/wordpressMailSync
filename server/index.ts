@@ -4,10 +4,12 @@ import { Cron } from "croner";
 import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import { serveStatic } from "hono/bun";
+import { streamSSE } from "hono/streaming";
+import { totalmem } from "node:os";
 import { createApp } from "./app.ts";
 import { ArticleSchema } from "./rewrite.ts";
 
-const { cfg, store, push, pipeline } = createApp();
+const { cfg, store, push, events, rewriter, pipeline } = createApp();
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const at = (cron: Cron | null) => cron?.nextRun()?.toLocaleString("de-DE", { timeZone: cfg.limits.timezone }) ?? "–";
@@ -60,7 +62,9 @@ const api = new Hono()
         site: cfg.llm.siteName,
         wpUrl: cfg.wp.url,
         wpStatus: cfg.wp.status,
-        model: cfg.llm.provider === "claude" ? `Claude (${cfg.llm.claudeModel})` : `lokal: ${cfg.llm.ollamaModel} (Ollama)`,
+        model: cfg.llm.provider === "claude" ? `Claude (${rewriter.model})` : `lokal: ${rewriter.model} (Ollama)`,
+        provider: cfg.llm.provider,
+        activeModel: rewriter.model,
         folder: cfg.imap.folder,
         seoPlugin: cfg.wp.seoPlugin,
         categories: cfg.wp.categories,
@@ -89,6 +93,62 @@ const api = new Hono()
   .post("/run", async (c) => c.json(await pipeline.run(c.req.query("dryRun") === "1")))
   .post("/suggest", async (c) => c.json(await pipeline.suggest()))
   .get("/log", (c) => c.json(store.recentLog()))
+  .get("/mails/:uid/trace", (c) => c.json(store.getTrace(uid(c))))
+  // Installierte Ollama-Modelle; zu große Modelle (mehr als ~70 % des Arbeitsspeichers) werden markiert
+  .get("/llm/models", async (c) => {
+    const ramGB = totalmem() / 1e9;
+    const base = { provider: cfg.llm.provider, current: rewriter.model, ramGB: Math.round(ramGB) };
+    if (cfg.llm.provider === "claude") return c.json({ ...base, models: [] });
+    try {
+      type Tag = { name: string; size: number; details?: { parameter_size?: string; quantization_level?: string; family?: string } };
+      const [tags, ps] = await Promise.all([
+        fetch(`${cfg.llm.ollamaUrl}/api/tags`).then((r) => r.json() as Promise<{ models: Tag[] }>),
+        fetch(`${cfg.llm.ollamaUrl}/api/ps`).then((r) => r.json() as Promise<{ models: { name: string }[] }>),
+      ]);
+      const loaded = new Set(ps.models.map((m) => m.name));
+      return c.json({
+        ...base,
+        models: tags.models.map((m) => ({
+          name: m.name.replace(/:latest$/, ""),
+          sizeGB: Math.round(m.size / 1e8) / 10,
+          params: m.details?.parameter_size ?? "",
+          quantization: m.details?.quantization_level ?? "",
+          family: m.details?.family ?? "",
+          loaded: loaded.has(m.name),
+          tooBig: m.size / 1e9 > ramGB * 0.7,
+        })),
+      });
+    } catch {
+      return c.json({ ...base, models: [], error: `Ollama nicht erreichbar unter ${cfg.llm.ollamaUrl}` });
+    }
+  })
+  .put("/llm/model", async (c) => {
+    const { model } = (await c.req.json()) as { model: string };
+    const tags = (await (await fetch(`${cfg.llm.ollamaUrl}/api/tags`)).json()) as { models: { name: string }[] };
+    if (!tags.models.some((m) => m.name === model || m.name === `${model}:latest`)) return c.json({ error: `Modell „${model}“ ist nicht installiert` }, 400);
+    store.setSetting("ollama_model", model);
+    return c.json({ current: rewriter.model });
+  })
+  // Live-Datenstrom: was das Modell gerade schreibt (Server-Sent Events)
+  .get("/llm/events", (c) =>
+    streamSSE(c, async (stream) => {
+      const queue: string[] = [];
+      let wake: (() => void) | null = null;
+      const send = (data: unknown) => {
+        queue.push(JSON.stringify(data));
+        wake?.();
+      };
+      send({ type: "snapshot", active: events.active() });
+      const unsubscribe = events.subscribe(send);
+      stream.onAbort(unsubscribe);
+      while (!stream.aborted) {
+        if (!queue.length) await Promise.race([new Promise<void>((r) => (wake = r)), stream.sleep(20_000)]);
+        wake = null;
+        if (!queue.length) await stream.writeSSE({ event: "ping", data: "" }); // hält die Verbindung offen
+        while (queue.length) await stream.writeSSE({ data: queue.shift()! });
+      }
+      unsubscribe();
+    }))
   .get("/push/key", (c) => c.json({ publicKey: push.publicKey }))
   .post("/push/subscribe", async (c) => {
     push.subscribe(await c.req.json());

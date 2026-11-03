@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { api, formatDate, type Article, type MailImages, type MailSummary, type OriginalMail, type Status } from "../api";
+import { live } from "../llm";
 import ArticleEditor from "./ArticleEditor.vue";
+import LiveOutput from "./LiveOutput.vue";
 
 const props = defineProps<{ status: Status | null; openUid?: number | null }>();
 const emit = defineEmits<{ changed: []; opened: [] }>();
@@ -19,6 +21,8 @@ const draftCount = computed(() => mails.value.filter((m) => m.hasDraft).length);
 const busy = ref<"" | "preview" | "publish" | "skip" | "save">("");
 const notice = ref("");
 const detail = ref<HTMLElement | null>(null);
+/** Läuft für die ausgewählte Mail gerade das Modell (per Klick oder vom Zeitplan)? */
+const liveRun = computed(() => (selected.value ? live.runs[selected.value.uid] ?? null : null));
 
 const limitReached = computed(() => (props.status ? props.status.today >= props.status.limit : false));
 
@@ -120,6 +124,14 @@ function removeSelected() {
   emit("changed");
 }
 
+// Hat der Zeitplan für die geöffnete Mail gerade einen Entwurf fertig geschrieben → anzeigen
+watch(() => (selected.value ? live.finished[selected.value.uid] : 0), (n) => {
+  if (n && selected.value && busy.value !== "preview") {
+    selected.value.hasDraft = true;
+    preview(false);
+  }
+});
+
 onMounted(load);
 </script>
 
@@ -185,7 +197,8 @@ onMounted(load);
           </div>
         </div>
 
-        <div v-if="busy === 'preview'" class="space-y-3">
+        <LiveOutput v-if="liveRun" :run="liveRun" />
+        <div v-else-if="busy === 'preview'" class="space-y-3">
           <div v-for="w in ['w-2/3', 'w-full', 'w-5/6', 'w-full', 'w-3/4']" :key="w" class="h-3 animate-pulse rounded bg-zinc-100 dark:bg-zinc-900" :class="w" />
         </div>
 

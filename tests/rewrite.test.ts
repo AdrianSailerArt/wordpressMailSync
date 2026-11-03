@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { LlmEvents, type LlmEvent, type LlmTrace } from "../server/llm-events.ts";
 import { Rewriter } from "../server/rewrite.ts";
 
 const cfg = {
@@ -77,4 +78,53 @@ test("Stil-Regelwerk wird an die Schreib-Anweisung angehängt", async () => {
 test("Ollama nicht erreichbar: verständliche Fehlermeldung", async () => {
   spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("connection refused"));
   expect(new Rewriter(cfg, ["News"]).rewrite(mail)).rejects.toThrow("läuft die Ollama-App?");
+});
+
+/** Ollama-Antwort als Datenstrom: mehrere Textstücke, zum Schluss die Messwerte. */
+const streamed = (content: string) => {
+  const parts = content.match(/.{1,7}/gs) ?? [];
+  const lines = parts.map((p) => JSON.stringify({ message: { content: p }, done: false }));
+  lines.push(JSON.stringify({ message: { content: "" }, done: true, prompt_eval_count: 120, eval_count: 40, eval_duration: 2e9 }));
+  return new Response(lines.join("\n") + "\n");
+};
+
+test("Live-Ausgabe: Textstücke, Messwerte und vollständiges Protokoll", async () => {
+  spyOn(globalThis, "fetch").mockResolvedValueOnce(streamed(music)).mockResolvedValueOnce(streamed(article));
+  const events = new LlmEvents();
+  const seen: LlmEvent[] = [];
+  events.subscribe((e) => seen.push(e));
+  let trace: LlmTrace | null = null;
+
+  const result = await new Rewriter(cfg, ["News"], { events, onTrace: (t) => (trace = t) }).rewrite(mail);
+
+  expect(result.generated_by).toBe("gemma4");
+  expect(seen.filter((e) => e.type === "token").length).toBeGreaterThan(10);
+  expect(seen.map((e) => e.type).filter((t) => t !== "token")).toEqual(["start", "end", "start", "end", "result"]);
+  expect(trace!.stages.map((s) => s.stage)).toEqual(["check", "write"]);
+  expect(trace!.stages[1]!.raw).toBe(article);
+  expect(trace!.stages[1]!.stats).toMatchObject({ promptTokens: 120, outputTokens: 40, tokensPerSec: 20 });
+  expect(events.active()).toEqual([]);
+});
+
+test("Modell lässt sich zur Laufzeit wechseln", async () => {
+  const spy = spyOn(globalThis, "fetch").mockResolvedValueOnce(reply(music)).mockResolvedValueOnce(reply(article));
+  let chosen = "qwen3:8b";
+  const rw = new Rewriter(cfg, ["News"], { model: () => chosen });
+  expect(rw.model).toBe("qwen3:8b");
+  const result = await rw.rewrite(mail);
+  expect(body(spy, 0).model).toBe("qwen3:8b");
+  expect(body(spy, 1).model).toBe("qwen3:8b");
+  expect(result.generated_by).toBe("qwen3:8b");
+  chosen = "";
+  expect(rw.model).toBe("gemma4"); // ohne Auswahl gilt OLLAMA_MODEL
+});
+
+test("Fehler im Lauf: Protokoll enthält den Fehler, Live-Anzeige wird beendet", async () => {
+  spyOn(globalThis, "fetch").mockResolvedValueOnce(reply(music)).mockResolvedValueOnce(new Response("kaputt", { status: 500 }));
+  const events = new LlmEvents();
+  let trace: LlmTrace | null = null;
+  expect(new Rewriter(cfg, ["News"], { events, onTrace: (t) => (trace = t) }).rewrite(mail)).rejects.toThrow("Ollama: 500");
+  await Bun.sleep(10);
+  expect(trace!.stages[1]!.error).toContain("Ollama: 500");
+  expect(events.active()).toEqual([]);
 });

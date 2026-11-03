@@ -2,6 +2,7 @@
 import { computed, ref, toRaw, watch } from "vue";
 import { api, type Article, type MailImages, type OriginalMail } from "../api";
 import MailCompare from "./MailCompare.vue";
+import TraceView from "./TraceView.vue";
 
 const props = defineProps<{
   article: Article;
@@ -14,11 +15,12 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ save: [Article]; publish: [] }>();
 
-type View = "preview" | "original" | "compare" | "html";
+type View = "preview" | "original" | "compare" | "trace" | "html";
 const views: { id: View; label: string }[] = [
   { id: "preview", label: "Beitrag" },
   { id: "original", label: "Original" },
   { id: "compare", label: "Vergleich" },
+  { id: "trace", label: "KI" },
   { id: "html", label: "HTML" },
 ];
 
@@ -62,6 +64,10 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-
   <div v-if="!article.relevant" class="rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
     <p class="font-medium">Keine Musik-Pressemitteilung</p>
     <p class="mt-1 text-zinc-500">{{ article.reason }}</p>
+    <details class="mt-3">
+      <summary class="cursor-pointer text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">KI-Protokoll ansehen</summary>
+      <TraceView class="mt-3" :uid="uid" />
+    </details>
   </div>
 
   <div v-else class="space-y-6">
@@ -170,13 +176,15 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-
         <MailCompare v-else :original="original.body" :html="draft.content_html" :title="draft.title" />
       </template>
 
+      <TraceView v-else-if="view === 'trace'" :uid="uid" />
+
       <textarea v-else v-model="draft.content_html" rows="24" class="field font-mono text-xs leading-relaxed" />
     </div>
 
     <!-- Aktionen -->
     <div class="sticky bottom-0 -mx-1 flex items-center gap-2 bg-white/90 px-1 py-3 backdrop-blur dark:bg-zinc-950/90">
       <span class="mr-auto text-xs text-zinc-500">
-        {{ dirty ? "Ungespeicherte Änderungen" : limitReached ? "Tageslimit erreicht" : "" }}
+        {{ dirty ? "Ungespeicherte Änderungen" : limitReached ? "Tageslimit erreicht" : article.generated_by ? `geschrieben von ${article.generated_by}` : "" }}
       </span>
       <button class="btn" :disabled="!dirty || !!busy" @click="emit('save', { ...draft, tags: tags() })">
         {{ busy === "save" ? "Speichert …" : "Speichern" }}
