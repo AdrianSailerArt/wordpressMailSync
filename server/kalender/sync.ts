@@ -1,11 +1,12 @@
 /** Konzertkalender: alle Quellen abrufen, Dubletten zusammenführen und ans WordPress-Plugin schicken. */
 
+import { createHash } from "node:crypto";
 import type { KalenderConfig } from "../config.ts";
 import { generateJson } from "../rewrite.ts";
 import { localDate } from "../wordpress.ts";
 import { fetchText, loadQuellen, mergeDuplicates, type KonzertEvent, type Quelle, type Quellen } from "./events.ts";
 import { compare, prepare, type Abgleich, type WpEvent } from "./abgleich.ts";
-import { fetchSeite } from "./seite.ts";
+import { fetchSeite, type AskJson } from "./seite.ts";
 import { fetchTicketmaster } from "./ticketmaster.ts";
 import { fetchVaddi } from "./vaddi.ts";
 import { fetchZ7 } from "./z7.ts";
@@ -33,6 +34,8 @@ export interface KalenderResult {
   transferredAt?: string;
   /** einzeln übertragene Termine eines Probelaufs */
   transferredUids?: string[];
+  /** einzeln übertragene Quellen eines Probelaufs */
+  transferredSources?: string[];
   /** Abruf wurde abgebrochen – enthält nur die fertigen Quellen */
   cancelled?: boolean;
   sources: SourceResult[];
@@ -49,16 +52,58 @@ export interface KalenderProgress {
   startedAt: string;
   /** Abbrechen wurde angefordert, die laufende Anfrage wird gerade gestoppt */
   cancelling?: boolean;
+  /** Seite, die das Sprachmodell gerade liest */
+  reading?: string;
+}
+
+/** Was übertragen wird: nichts angegeben = alles, `uids` = nur diese Termine, `sources` = nur diese Quellen */
+export interface Auswahl {
+  uids?: string[];
+  sources?: string[];
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
+/** Zwischenspeicher für Antworten des Sprachmodells (im Dashboard die SQLite-Datenbank) */
+export interface KalenderCache {
+  getCached(key: string): string | null;
+  setCached(key: string, value: string): void;
+  touchCached(key: string): void;
+}
+
+/** wie viele Seitenabschnitte das Modell lesen musste und wie viele aus dem Zwischenspeicher kamen */
+interface AskStats {
+  asked: number;
+  cached: number;
+}
+
 export class Kalender {
   busy = false;
 
-  constructor(private cfg: KalenderConfig, private model: () => string) {}
+  constructor(private cfg: KalenderConfig, private model: () => string, private cache?: KalenderCache) {}
 
-  private async fetchSource(q: Quelle, quellen: Quellen, today: string, abort: AbortSignal): Promise<KonzertEvent[]> {
+  /**
+   * Modell fragen – oder die gespeicherte Antwort für genau diesen Abschnitt nehmen. Der Schlüssel enthält Modell,
+   * Anweisung (mit Monat statt Tag, wegen der Jahreszahl) und Abschnitt. Leere Antworten werden nicht gespeichert,
+   * damit beim nächsten Mal neu gefragt wird.
+   */
+  private askCached(model: string, today: string, abort: AbortSignal, stats: AskStats): AskJson {
+    return async (system, user, schema) => {
+      const key = createHash("sha256").update(`${model}\n${system.replaceAll(today, today.slice(0, 7))}\n${user}`).digest("hex");
+      const hit = this.cache?.getCached(key);
+      if (hit) {
+        this.cache!.touchCached(key);
+        stats.cached++;
+        return JSON.parse(hit);
+      }
+      const raw = await generateJson(this.cfg.llm, model, system, user, schema, abort);
+      stats.asked++;
+      if ((raw as { events?: unknown[] }).events?.length) this.cache?.setCached(key, JSON.stringify(raw));
+      return raw;
+    };
+  }
+
+  private async fetchSource(q: Quelle, quellen: Quellen, today: string, abort: AbortSignal, stats: AskStats): Promise<KonzertEvent[]> {
     switch (q.typ) {
       case "vaddi":
         return fetchVaddi(q.url, today, quellen, abort);
@@ -69,8 +114,7 @@ export class Kalender {
         return (await fetchTicketmaster(this.cfg.ticketmasterKey, quellen.gebiet, quellen.ausschliessen, abort)).filter((e) => e.date >= today);
       case "seite": {
         const model = this.model();
-        return fetchSeite(q, await fetchText(q.url, abort), today, quellen.ausschliessen, (system, user, schema) =>
-          generateJson(this.cfg.llm, model, system, user, schema, abort));
+        return fetchSeite(q, await fetchText(q.url, abort), today, quellen.ausschliessen, this.askCached(model, today, abort, stats));
       }
     }
   }
@@ -104,10 +148,19 @@ export class Kalender {
   /** Quellen, die beim Übertragen aller Termine ersetzt würden (ohne Fehler und mit Treffern) */
   private replaceable = (result: KalenderResult) => result.sources.filter((s) => !s.error && !s.skipped).map((s) => s.id);
 
-  /** Vergleich mit WordPress: alle Termine (`uids` leer) oder nur ausgewählte. */
-  async abgleich(result: KalenderResult, uids?: string[], existing?: WpEvent[]): Promise<Abgleich> {
-    const events = uids?.length ? result.events.filter((e) => uids.includes(e.uid)) : result.events;
-    return compare(events, existing ?? await this.existing(), uids?.length ? [] : this.replaceable(result), localDate(this.cfg.timezone));
+  /**
+   * Vergleich mit WordPress für das, was übertragen werden soll: alle Termine, nur ausgewählte (`uids`, ersetzt nichts)
+   * oder nur bestimmte Quellen (`sources`, ersetzt nur diese).
+   */
+  async abgleich(result: KalenderResult, sel: Auswahl = {}, existing?: WpEvent[]): Promise<Abgleich> {
+    const { events, replaced } = this.pick(result, sel);
+    return compare(events, existing ?? await this.existing(), replaced, localDate(this.cfg.timezone));
+  }
+
+  private pick(result: KalenderResult, { uids, sources }: Auswahl) {
+    if (uids?.length) return { events: result.events.filter((e) => uids.includes(e.uid)), replaced: [] as string[] };
+    const replaced = this.replaceable(result).filter((id) => !sources?.length || sources.includes(id));
+    return { events: result.events.filter((e) => replaced.includes(e.source)), replaced };
   }
 
   /** Was gerade passiert – fürs Dashboard */
@@ -152,27 +205,50 @@ export class Kalender {
     const today = localDate(this.cfg.timezone);
     const selected = quellen.quellen.filter((q) => !only?.length || only.includes(q.id));
     if (this.progress) this.progress.total = selected.length;
-    const results: SourceResult[] = [];
-    const all: KonzertEvent[] = [];
-
+    const byId = new Map<string, { result: SourceResult; events: KonzertEvent[] }>();
+    const running = new Set<string>();
     const abort = this.abort!.signal;
-    // nacheinander: das Sprachmodell schafft ohnehin nur eine Seite gleichzeitig
-    for (const q of selected) {
-      if (abort.aborted) break;
-      if (this.progress) this.progress.current = q.name;
+    const show = () => {
+      if (this.progress) this.progress.current = [...running].join(", ");
+    };
+
+    const fetchOne = async (q: Quelle) => {
+      if (abort.aborted) return;
+      running.add(q.name);
+      show();
+      if (q.typ === "seite" && this.progress) this.progress.reading = q.name;
+      const stats: AskStats = { asked: 0, cached: 0 };
       try {
-        const events = (await this.fetchSource(q, quellen, today, abort)).map((e) => ({ ...e, source: q.id }));
-        results.push({ id: q.id, name: q.name, found: events.length, sent: 0 });
-        all.push(...events);
-        log(`${q.name}: ${events.length} Termine`);
+        const events = (await this.fetchSource(q, quellen, today, abort, stats)).map((e) => ({ ...e, source: q.id }));
+        byId.set(q.id, { result: { id: q.id, name: q.name, found: events.length, sent: 0 }, events });
+        const cached = stats.cached ? ` (${stats.cached} von ${stats.cached + stats.asked} Abschnitten aus dem Zwischenspeicher)` : "";
+        log(`${q.name}: ${events.length} Termine${cached}`);
       } catch (err) {
         // abgebrochene Quelle zählt nicht – sie behält ihr voriges Ergebnis
-        if (abort.aborted) break;
-        results.push({ id: q.id, name: q.name, found: 0, sent: 0, error: message(err) });
+        if (abort.aborted) return;
+        byId.set(q.id, { result: { id: q.id, name: q.name, found: 0, sent: 0, error: message(err) }, events: [] });
         log(`${q.name}: Fehler – ${message(err)}`);
+      } finally {
+        running.delete(q.name);
+        if (this.progress?.reading === q.name) this.progress.reading = "";
+        if (this.progress && !abort.aborted) this.progress.done++;
+        show();
       }
-      if (this.progress) this.progress.done++;
-    }
+    };
+
+    // Das Sprachmodell schafft nur eine Seite gleichzeitig – Vaddi, Z7 und Ticketmaster laufen derweil nebenher
+    const llm = selected.filter((q) => q.typ === "seite");
+    await Promise.all([
+      (async () => {
+        for (const q of llm) await fetchOne(q);
+      })(),
+      ...selected.filter((q) => q.typ !== "seite").map(fetchOne),
+    ]);
+
+    // in der Reihenfolge der Quellenliste – sie entscheidet beim Zusammenführen
+    const done = selected.flatMap((q) => byId.get(q.id) ?? []);
+    const results = done.map((d) => d.result);
+    const all = done.flatMap((d) => d.events);
     if (abort.aborted) log(`Abgebrochen – ${results.length} von ${selected.length} Quellen fertig, nichts übertragen`);
 
     // Reihenfolge der Quellenliste = Vorrang beim Zusammenführen
@@ -190,17 +266,19 @@ export class Kalender {
    * Termine derselben Quelle aktualisieren den vorhandenen Eintrag. Ohne `uids` werden alle Quellen ersetzt
    * (Quellen mit Fehler oder ohne Treffer bleiben unangetastet), mit `uids` nur diese Termine ergänzt.
    */
-  private async send(result: KalenderResult, log: (line: string) => void, uids?: string[]): Promise<KalenderResult> {
+  private async send(result: KalenderResult, log: (line: string) => void, sel: Auswahl = {}): Promise<KalenderResult> {
+    const { uids, sources: only } = sel;
     const selected = !!uids?.length;
-    const abgleich = await this.abgleich(result, uids);
-    const events = prepare(selected ? result.events.filter((e) => uids!.includes(e.uid)) : result.events, abgleich);
+    const picked = this.pick(result, sel);
+    const abgleich = await this.abgleich(result, sel);
+    const events = prepare(picked.events, abgleich);
     const duplicates = abgleich.checks.filter((c) => c.state === "dublette");
     if (duplicates.length) log(`${duplicates.length} Termine stehen schon in WordPress und werden nicht nochmal angelegt`);
 
     const sources: SourceResult[] = result.sources.map((s) => ({ ...s, sendError: undefined }));
     const targets = selected
       ? sources.filter((s) => events.some((e) => e.source === s.id))
-      : sources.filter((s) => this.replaceable(result).includes(s.id));
+      : sources.filter((s) => picked.replaced.includes(s.id));
     if (this.progress) Object.assign(this.progress, { total: targets.length, done: 0 });
     for (const s of targets) {
       if (this.abort?.signal.aborted) {
@@ -223,7 +301,11 @@ export class Kalender {
       // Auswahl: der Rest ist weiter nicht übertragen
       return { ...result, sources, transferredUids: [...new Set([...(result.transferredUids ?? []), ...uids!])] };
     }
-    return { ...result, dryRun: false, transferredAt: now, transferredUids: undefined, sources };
+    if (only?.length && targets.length < this.replaceable(result).length) {
+      // einzelne Quellen: die übrigen sind weiter nicht übertragen
+      return { ...result, sources, transferredSources: [...new Set([...(result.transferredSources ?? []), ...targets.map((s) => s.id)])] };
+    }
+    return { ...result, dryRun: false, transferredAt: now, transferredUids: undefined, transferredSources: undefined, sources };
   }
 
   /** `only`: nur diese Quellen-IDs abrufen; `dryRun`: nichts übertragen. */
@@ -257,10 +339,10 @@ export class Kalender {
   }
 
   /** Ergebnis eines Probelaufs übertragen (alle oder nur `uids`), ohne die Seiten noch einmal zu lesen. */
-  async transfer(result: KalenderResult, log?: (line: string) => void, uids?: string[]): Promise<KalenderResult> {
+  async transfer(result: KalenderResult, log?: (line: string) => void, sel: Auswahl = {}): Promise<KalenderResult> {
     const write = this.begin("übertragen", 0, log);
     try {
-      return await this.send(result, write, uids);
+      return await this.send(result, write, sel);
     } finally {
       this.end();
     }

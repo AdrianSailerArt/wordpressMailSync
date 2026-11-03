@@ -105,9 +105,16 @@ const sameArtist = (a: string, b: string) => {
   return x === y || (Math.min(x.length, y.length) >= 4 && (x.includes(y) || y.includes(x)));
 };
 
-/** Derselbe Abend am selben Ort mit mindestens einem gemeinsamen Künstler. */
+const minutes = (time: string) => (/^\d{2}:\d{2}$/.test(time) ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3)) : null);
+
+/**
+ * Derselbe Abend am selben Ort mit mindestens einem gemeinsamen Künstler. Liegen beide Uhrzeiten
+ * mindestens zwei Stunden auseinander, sind es zwei Vorstellungen (z. B. Nachmittag und Abend).
+ */
 export function isSameEvent(a: KonzertEvent, b: KonzertEvent): boolean {
   if (a.date !== b.date || !sameCity(a.city, b.city)) return false;
+  const [ta, tb] = [minutes(a.time), minutes(b.time)];
+  if (ta !== null && tb !== null && Math.abs(ta - tb) >= 120) return false;
   const names = (e: KonzertEvent) => (e.artists.length ? e.artists : [e.title]);
   return names(a).some((x) => names(b).some((y) => sameArtist(x, y)));
 }

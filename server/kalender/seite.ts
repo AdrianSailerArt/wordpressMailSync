@@ -14,6 +14,7 @@ export type AskJson = (system: string, user: string, schema: object) => Promise<
 
 // lange Programmseiten in Stücken, damit Eingabe und Antwort ins Kontextfenster passen
 const CHUNK = 12_000;
+const MIN_CHUNK = 3_000;
 
 export const SCHEMA = {
   type: "object",
@@ -75,8 +76,18 @@ export function pageText(html: string): string {
   }).replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** an Absätzen geteilt, jedes Stück höchstens `size` Zeichen */
-export function chunks(text: string, size = CHUNK): string[] {
+/** kleiner, schneller Hash (FNV-1a) */
+const fnv = (s: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h;
+};
+
+/**
+ * An Absätzen geteilt, jedes Stück höchstens `size` Zeichen. Die Schnitte hängen vom Inhalt ab, nicht von der
+ * Position: Fällt oben ein vergangener Termin weg, bleiben die übrigen Stücke gleich – und damit im Zwischenspeicher.
+ */
+export function chunks(text: string, size = CHUNK, min = Math.min(MIN_CHUNK, size / 4)): string[] {
   const out: string[] = [];
   let current = "";
   for (const part of text.split(/\n(?=\S)/)) {
@@ -85,6 +96,11 @@ export function chunks(text: string, size = CHUNK): string[] {
       current = "";
     }
     current = current ? `${current}\n${part}` : part.slice(0, size);
+    // Schnitt nach etwa jedem achten Absatz, ausgewählt über dessen Inhalt
+    if (current.length >= min && fnv(part.trim()) % 8 === 0) {
+      out.push(current);
+      current = "";
+    }
   }
   if (current) out.push(current);
   return out;

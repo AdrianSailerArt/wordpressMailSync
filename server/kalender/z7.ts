@@ -22,7 +22,8 @@ export function parseZ7(html: string): KonzertEvent[] {
       source: "z7",
       date,
       time: "",
-      artists: [headliner, ...(support ? text(support).split(/\s*·\s*/).filter(Boolean) : [])],
+      // „Sonata Arctica · Rage“ = zwei Headliner
+      artists: [...headliner.split(/\s*·\s*/), ...(support ? text(support).split(/\s*·\s*/) : [])].filter(Boolean),
       title: subtitle ? `${headliner} – ${subtitle}` : headliner,
       venue: "Konzertfabrik Z7",
       city: "Pratteln",
@@ -38,7 +39,8 @@ export function parseZ7(html: string): KonzertEvent[] {
 /** Beginn, Einlass und Preis von der Detailseite (WooCommerce/FooEvents). */
 export function parseZ7Detail(html: string): { time: string; info: string } {
   const field = (label: string) => html.match(new RegExp(`<b>${label}:\\s*</b>\\s*(\\d{1,2}:\\d{2})`))?.[1]?.padStart(5, "0") ?? "";
-  const price = text(html.match(/<p class="price">([\s\S]*?)<\/p>/)?.[1] ?? "").replace(/\s+/g, " ");
+  // der Shop rechnet je nach Besucherland in Euro um – der Preis trägt seine Währung immer mit
+  const price = text((html.match(/<p class="price">([\s\S]*?)<\/p>/)?.[1] ?? "").replace(/<span class="screen-reader-text">[\s\S]*?<\/span>/g, ""));
   const doors = field("Einlass");
   return { time: field("Beginn"), info: [doors && `Einlass ${doors}`, price && `Tickets ${price}`].filter(Boolean).join(" · ") };
 }

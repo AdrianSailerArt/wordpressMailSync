@@ -145,6 +145,8 @@ export function loadKalenderConfig() {
     postStatus: env("KALENDER_STATUS", "publish") as "publish" | "draft",
     auto: bool("KALENDER_AUTO", false),
     schedule: env("KALENDER_SCHEDULE", "30 6 * * *"),
+    // Zwischenspeicher fürs Sprachmodell liegt in der Datenbank des Dashboards
+    dbPath: env("DB_PATH", "data/pressbot.sqlite"),
   };
   reportMissing();
   return config;

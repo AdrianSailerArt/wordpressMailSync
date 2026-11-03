@@ -133,9 +133,15 @@ const runAndTransfer = () => start(() => api.kalenderRun(false));
 const transferAll = () => start(() => api.kalenderTransfer());
 const cancel = () => start(() => api.kalenderCancel());
 const transferSelected = () => start(async () => {
-  await api.kalenderTransfer(selected.value);
+  await api.kalenderTransfer({ uids: selected.value });
   selected.value = [];
 });
+const transferSource = (id: string) => start(() => api.kalenderTransfer({ sources: [id] }));
+/** Quelle hat abrufbare Termine aus dem letzten Abruf */
+const canTransfer = (id: string) => {
+  const r = last.value?.sources.find((s) => s.id === id);
+  return !!r && !r.error && !r.skipped && r.found > 0;
+};
 
 // während eines Abrufs alle 3 Sekunden nachsehen, sonst jede Minute (Zeitplan)
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -163,7 +169,9 @@ onUnmounted(() => clearTimeout(timer));
         <p v-if="last" class="mt-0.5 text-xs text-zinc-500">
           {{ last.events.length }} Termine · abgerufen {{ formatDate(last.at) }} ·
           <span v-if="!last.dryRun">übertragen {{ formatDate(last.transferredAt ?? last.at) }}</span>
-          <span v-else-if="last.transferredUids?.length" class="text-amber-600 dark:text-amber-400">{{ last.transferredUids.length }} einzeln übertragen</span>
+          <span v-else-if="last.transferredUids?.length || last.transferredSources?.length" class="text-amber-600 dark:text-amber-400">
+            teilweise übertragen<template v-if="last.transferredSources?.length">: {{ last.transferredSources.map(sourceName).join(", ") }}</template><template v-if="last.transferredUids?.length"> · {{ last.transferredUids.length }} einzelne Termine</template>
+          </span>
           <span v-else class="text-amber-600 dark:text-amber-400">Probelauf, noch nicht übertragen</span>
         </p>
         <p v-else class="mt-0.5 text-xs text-zinc-500">Noch nicht abgerufen.</p>
@@ -212,8 +220,8 @@ onUnmounted(() => clearTimeout(timer));
       <div class="mt-2 h-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
         <div class="h-full bg-zinc-900 transition-all dark:bg-white" :style="{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }" />
       </div>
-      <p v-if="progress.task === 'abrufen' && state.sources.find((s) => s.name === progress?.current)?.typ === 'seite'" class="mt-2 text-xs text-zinc-500">
-        Das Sprachmodell liest die Seite – das dauert etwa ein bis zwei Minuten.
+      <p v-if="progress.task === 'abrufen' && progress.reading" class="mt-2 text-xs text-zinc-500">
+        Das Sprachmodell liest {{ progress.reading }} – neue oder geänderte Abschnitte dauern je etwa eine Minute, unveränderte kommen aus dem Zwischenspeicher.
       </p>
       <ul v-if="progress.lines.length" class="mt-2 space-y-0.5 font-mono text-xs text-zinc-500">
         <li v-for="(l, i) in progress.lines" :key="i">{{ l }}</li>
@@ -291,12 +299,21 @@ onUnmounted(() => clearTimeout(timer));
               <div class="flex items-baseline gap-2">
                 <button class="truncate text-left text-sm font-medium" @click="source = source === s.id ? '' : s.id">{{ s.name }}</button>
                 <a :href="s.url" target="_blank" class="shrink-0 text-xs text-zinc-400 hover:text-zinc-600" title="Seite öffnen">↗</a>
+              </div>
+              <div class="mt-1 flex gap-3 text-xs">
                 <button
-                  class="ml-auto shrink-0 text-xs text-zinc-400 opacity-0 hover:text-zinc-700 group-hover:opacity-100 disabled:hidden dark:hover:text-zinc-200"
+                  class="text-zinc-500 underline-offset-2 hover:text-zinc-800 hover:underline disabled:opacity-40 dark:hover:text-zinc-200"
                   :disabled="state.busy || starting"
-                  title="Nur diese Quelle probeweise abrufen"
+                  title="Nur diese Location neu abrufen – nichts an WordPress schicken, die anderen Quellen bleiben wie sie sind"
                   @click="dryRun([s.id])"
-                >testen</button>
+                >abrufen</button>
+                <button
+                  v-if="canTransfer(s.id)"
+                  class="text-zinc-500 underline-offset-2 hover:text-zinc-800 hover:underline disabled:opacity-40 dark:hover:text-zinc-200"
+                  :disabled="state.busy || starting || !abgleich"
+                  title="Nur die Termine dieser Location an WordPress schicken (ohne Dubletten). Ihre Termine, die sie nicht mehr liefert, werden entfernt – andere Quellen bleiben unberührt."
+                  @click="transferSource(s.id)"
+                >übertragen</button>
               </div>
               <template v-for="r in [last?.sources.find((x) => x.id === s.id)]" :key="s.id + 'r'">
                 <p v-if="r?.error" class="mt-0.5 break-words text-xs text-rose-600 dark:text-rose-400">{{ r.error }}</p>

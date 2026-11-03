@@ -36,6 +36,8 @@ export class Store {
       endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL, created_at TEXT NOT NULL)`);
     this.db.run("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     this.db.run("CREATE TABLE IF NOT EXISTS traces (uid INTEGER PRIMARY KEY, trace TEXT NOT NULL, updated_at TEXT NOT NULL)");
+    // Konzertkalender: Antworten des Sprachmodells je Seitenabschnitt – unveränderte Abschnitte nicht neu lesen
+    this.db.run("CREATE TABLE IF NOT EXISTS kalender_cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, ts TEXT NOT NULL)");
     this.db.run(`CREATE TABLE IF NOT EXISTS log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, kind TEXT NOT NULL,
       subject TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '')`);
@@ -116,6 +118,22 @@ export class Store {
   getTrace(uid: number): LlmTrace | null {
     const row = this.db.query<{ trace: string }, [number]>("SELECT trace FROM traces WHERE uid = ?").get(uid);
     return row ? (JSON.parse(row.trace) as LlmTrace) : null;
+  }
+
+  getCached(key: string): string | null {
+    return this.db.query<{ value: string }, [string]>("SELECT value FROM kalender_cache WHERE key = ?").get(key)?.value ?? null;
+  }
+
+  /** speichert und räumt dabei Einträge auf, die seit 30 Tagen nicht mehr gebraucht wurden */
+  setCached(key: string, value: string): void {
+    const now = new Date();
+    this.db.query("INSERT OR REPLACE INTO kalender_cache (key, value, ts) VALUES (?, ?, ?)").run(key, value, now.toISOString());
+    this.db.query("DELETE FROM kalender_cache WHERE ts < ?").run(new Date(now.getTime() - 30 * 86_400_000).toISOString());
+  }
+
+  /** Treffer auffrischen, damit oft gebrauchte Einträge nicht verfallen */
+  touchCached(key: string): void {
+    this.db.query("UPDATE kalender_cache SET ts = ? WHERE key = ?").run(new Date().toISOString(), key);
   }
 
   log(kind: LogKind, subject = "", detail = "", link = ""): void {

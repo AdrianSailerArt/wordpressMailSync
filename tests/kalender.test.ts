@@ -9,6 +9,8 @@ import { compare, prepare, type WpEvent } from "../server/kalender/abgleich.ts";
 import type { KalenderConfig } from "../server/config.ts";
 import { geohash, mapTicketmaster } from "../server/kalender/ticketmaster.ts";
 import { filterVaddi, looksLikeMusic, parseDescription, parseVaddi } from "../server/kalender/vaddi.ts";
+import { parseZ7, parseZ7Detail } from "../server/kalender/z7.ts";
+import { Store } from "../server/db.ts";
 
 const quellen = loadQuellen("kalender/quellen.json");
 
@@ -265,5 +267,88 @@ describe("Abbrechen", () => {
     expect(result.transferredAt).toBeUndefined();
     expect(kalender.busy).toBe(false);
     expect(kalender.cancel()).toBe(false);
+  });
+});
+
+describe("Konzertfabrik Z7", () => {
+  const article = (date: string, slug: string, h2: string, sub: string, badge = "") => `<article class="space-y-1.5"><div><div>
+    <time datetime="${date}" class="uppercase">Fr. 6. Nov.</time></div><div class="w-full">
+    <a href="https://z-7.ch/event/${slug}/" class="no-underline flex flex-col"><h2 class="mb-0">${h2}</h2><div class="*:mb-0">${sub}</div>
+    <div class="flex flex-wrap gap-1">${badge ? `<span class="inline-flex items-center bg-primary px-2">${badge}</span>` : ""}</div></a></div></div></article>`;
+
+  test("Kalender der Startseite: Headliner, Support, Untertitel, Hinweise", () => {
+    const events = parseZ7(
+      article("2026-11-06", "kamelot-2026", "Kamelot", "<h4>Exit Eden · Temperance</h4>") +
+      article("2026-11-05", "black-sabbitch-2026", "Black Sabbitch", "<p>All Female Black Sabbath Tribute</p>", "Verschoben auf 16. April 2027") +
+      article("2027-05-01", "sonata-arctica-rage-2027", "Sonata Arctica · Rage", "<p>Double Headliner Tour</p>"),
+    );
+    expect(events[0]).toMatchObject({
+      uid: "z7:kamelot-2026", date: "2026-11-06", artists: ["Kamelot", "Exit Eden", "Temperance"], title: "Kamelot",
+      venue: "Konzertfabrik Z7", city: "Pratteln", country: "CH", url: "https://z-7.ch/event/kamelot-2026/",
+    });
+    expect(events[1]).toMatchObject({ title: "Black Sabbitch – All Female Black Sabbath Tribute", info: "All Female Black Sabbath Tribute", status: "Verschoben auf 16. April 2027" });
+    expect(events[2]!.artists).toEqual(["Sonata Arctica", "Rage"]);
+  });
+
+  test("Detailseite: Beginn, Einlass, Preis (auch Preisspannen)", () => {
+    const html = `<div class="fooevents-meta"><p><b>Beginn: </b> 19:00  <span></span></p><p><b>Einlass: </b> 18:00 </p></div>
+      <p class="price"><span class="woocommerce-Price-amount amount"><bdi><span>&#67;&#72;&#70;</span>&nbsp;35.50</bdi></span> – <span>CHF&nbsp;117.00</span><span class="screen-reader-text">Preisspanne: CHF 35.50 bis CHF 117.00</span></p>`;
+    expect(parseZ7Detail(html)).toEqual({ time: "19:00", info: "Einlass 18:00 · Tickets CHF 35.50 – CHF 117.00" });
+  });
+
+  test("zwei Vorstellungen am selben Tag sind keine Dublette", () => {
+    expect(isSameEvent(event({ artists: ["Heavysaurus"], time: "14:00" }), event({ artists: ["Heavysaurus"], time: "17:30" }))).toBe(false);
+    expect(isSameEvent(event({ time: "20:00" }), event({ time: "20:30" }))).toBe(true);
+  });
+});
+
+describe("Schneller abrufen", () => {
+  test("Abschnitte bleiben gleich, wenn oben ein Termin wegfällt", () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `${(i % 28) + 1}.11. Band Nummer ${i} live ${"x".repeat(60)}`);
+    const before = chunks(lines.join("\n"), 12_000);
+    const after = chunks(lines.slice(1).join("\n"), 12_000);
+    expect(before.length).toBeGreaterThan(2);
+    // alle Abschnitte außer dem ersten sind unverändert
+    expect(after.slice(1)).toEqual(before.slice(1));
+  });
+
+  test("unveränderte Seiten liest das Modell kein zweites Mal; Quellen ohne Modell laufen nebenher", async () => {
+    let llmCalls = 0;
+    const page = `<html><body><h1>Programm</h1>${Array.from({ length: 8 }, (_, i) => `<p>${i + 10}.11. Band ${i} live im Club, VVK 20 €</p>`).join("")}</body></html>`;
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/api/chat") {
+          llmCalls++;
+          await Bun.sleep(300); // das „Modell“ rechnet
+          const events = Array.from({ length: 8 }, (_, i) => ({ date: `2026-11-${i + 10}`, time: "", artists: [`Band ${i}`], title: "", info: "", venue: "", status: "" }));
+          return new Response(`${JSON.stringify({ message: { content: JSON.stringify({ events }) }, done: true })}\n`);
+        }
+        if (url.pathname === "/z7") return new Response(""); // leere Z7-Seite: 0 Termine, aber sofort fertig
+        return new Response(page, { headers: { "Content-Type": "text/html" } });
+      },
+    });
+    const dir = mkdtempSync(join(tmpdir(), "kalender-"));
+    const file = join(dir, "quellen.json");
+    const base = `http://127.0.0.1:${server.port}`;
+    const seite = (id: string) => ({ typ: "seite", id, name: id, url: `${base}/${id}`, location: id, ort: "Freiburg", land: "DE" });
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(await Bun.file("kalender/quellen.json").text()), quellen: [seite("a"), seite("b"), { typ: "z7", id: "z7", name: "Z7", url: `${base}/z7` }] }));
+    const cfg = { file, timezone: "Europe/Berlin", llm: { provider: "ollama", ollamaUrl: base } } as KalenderConfig;
+    const store = new Store(":memory:");
+    const kalender = new Kalender(cfg, () => "test-modell", store);
+    const lines: string[] = [];
+
+    const first = await kalender.run({ dryRun: true, log: (l) => lines.push(l) });
+    expect(llmCalls).toBe(2);
+    expect(first.sources.map((s) => [s.id, s.found])).toEqual([["a", 8], ["b", 8], ["z7", 0]]);
+    // Z7 war fertig, bevor das Modell mit der ersten Seite durch war
+    expect(lines.findIndex((l) => l.startsWith("Z7"))).toBe(0);
+
+    const second = await kalender.run({ dryRun: true, log: (l) => lines.push(l) });
+    server.stop(true);
+    expect(llmCalls).toBe(2); // nichts neu gefragt
+    expect(second.events.length).toBe(first.events.length);
+    expect(lines.some((l) => l.includes("1 von 1 Abschnitten aus dem Zwischenspeicher"))).toBe(true);
   });
 });

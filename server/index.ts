@@ -8,7 +8,7 @@ import { streamSSE } from "hono/streaming";
 import { totalmem } from "node:os";
 import { createApp } from "./app.ts";
 import { loadKalenderConfig } from "./config.ts";
-import { Kalender, type KalenderResult } from "./kalender/sync.ts";
+import { Kalender, type Auswahl, type KalenderResult } from "./kalender/sync.ts";
 import { mailCsp } from "./mail-view.ts";
 import { ArticleSchema } from "./rewrite.ts";
 
@@ -39,13 +39,16 @@ const suggestJob = new Cron(cfg.limits.suggestSchedule, { timezone: cfg.limits.t
 
 /** Konzertkalender (täglich, wenn KALENDER_AUTO=true) – Veranstalter-Seiten, Vaddi, Ticketmaster → WordPress-Plugin. */
 const kalenderCfg = loadKalenderConfig();
-const kalender = new Kalender(kalenderCfg, () => rewriter.model);
+const kalender = new Kalender(kalenderCfg, () => rewriter.model, store);
 const lastKalender = (): KalenderResult | null => JSON.parse(store.getSetting("kalender_last") ?? "null");
-/** `selected`: Anzahl einzeln übertragener Termine */
-const saveKalender = (result: KalenderResult, selected?: number) => {
+/** `selected`: Anzahl einzeln übertragener Termine, `sources`: einzeln übertragene Quellen */
+const saveKalender = (result: KalenderResult, selected?: number, sources?: string[]) => {
   store.setSetting("kalender_last", JSON.stringify(result));
   const failed = result.sources.filter((s) => s.error || s.sendError);
-  const what = selected ? `${selected} ausgewählte Termine übertragen` : `${result.events.length} Termine${result.dryRun ? " (Probelauf)" : " übertragen"}`;
+  const names = sources?.map((id) => result.sources.find((s) => s.id === id)?.name ?? id).join(", ");
+  const what = selected
+    ? `${selected} ausgewählte Termine übertragen`
+    : names ? `${names} übertragen` : `${result.events.length} Termine${result.dryRun ? " (Probelauf)" : " übertragen"}`;
   store.log(failed.length ? "error" : "run", "Konzertkalender",
     `${what}${failed.length ? ` – Fehler bei ${failed.map((s) => s.name).join(", ")}` : ""}`);
   return result;
@@ -227,8 +230,8 @@ const api = new Hono()
   .post("/kalender/transfer", async (c) => {
     const last = lastKalender();
     if (!last) return c.json({ error: "Noch kein Abruf vorhanden" }, 400);
-    const { uids } = (await c.req.json().catch(() => ({}))) as { uids?: string[] };
-    inBackground(async () => saveKalender(await kalender.transfer(last, kalenderLog, uids), uids?.length));
+    const sel = (await c.req.json().catch(() => ({}))) as Auswahl;
+    inBackground(async () => saveKalender(await kalender.transfer(last, kalenderLog, sel), sel.uids?.length, sel.sources));
     return c.json({ started: true }, 202);
   })
   .get("/push/key", (c) => c.json({ publicKey: push.publicKey }))

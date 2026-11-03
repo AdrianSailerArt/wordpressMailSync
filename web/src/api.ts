@@ -197,6 +197,7 @@ export interface KalenderResult {
   dryRun: boolean;
   transferredAt?: string;
   transferredUids?: string[];
+  transferredSources?: string[];
   sources: KalenderSource[];
   events: KonzertEvent[];
 }
@@ -222,7 +223,7 @@ export interface Abgleich {
 
 export interface KalenderState {
   busy: boolean;
-  progress: { task: "abrufen" | "übertragen"; total: number; done: number; current: string; lines: string[]; startedAt: string; cancelling?: boolean } | null;
+  progress: { task: "abrufen" | "übertragen"; total: number; done: number; current: string; lines: string[]; startedAt: string; cancelling?: boolean; reading?: string } | null;
   nextRun: string | null;
   config: { schedule: string; auto: boolean; postStatus: string; ticketmaster: boolean; wpUrl: string };
   sources: { id: string; name: string; typ: "seite" | "vaddi" | "z7" | "ticketmaster"; url: string }[];
@@ -268,8 +269,8 @@ export const api = {
     call<{ started: true }>("POST", `/kalender/run?dryRun=${dryRun ? 1 : 0}${only.length ? `&only=${only.join(",")}` : ""}`),
   kalenderCancel: () => call<{ cancelled: boolean }>("POST", "/kalender/cancel"),
   kalenderAbgleich: () => call<Abgleich>("GET", "/kalender/abgleich"),
-  /** ohne uids: alle Termine (ersetzt die Quellen), mit uids: nur diese ergänzen */
-  kalenderTransfer: (uids?: string[]) => call<{ started: true }>("POST", "/kalender/transfer", uids?.length ? { uids } : {}),
+  /** nichts angegeben: alle Termine (ersetzt die Quellen) · uids: nur diese ergänzen · sources: nur diese Quellen ersetzen */
+  kalenderTransfer: (sel: { uids?: string[]; sources?: string[] } = {}) => call<{ started: true }>("POST", "/kalender/transfer", sel),
 };
 
 export const formatDate = (iso: string | null) =>
