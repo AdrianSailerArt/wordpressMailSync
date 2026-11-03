@@ -94,10 +94,10 @@ test("ein Beitrag pro Lauf, Mails werden korrekt markiert", async () => {
   expect(marks).toEqual([[1, SKIPPED_FLAG], [2, SKIPPED_FLAG], [3, DONE_FLAG]]);
 });
 
-test("Tageslimit erreicht: nichts passiert", async () => {
+test("Richtwert erreicht: Zeitplan veröffentlicht nichts", async () => {
   today = 3;
   const result = await pipeline().run();
-  expect(result.message).toContain("Tageslimit");
+  expect(result.message).toContain("Richtwert");
   expect(created).toEqual([]);
   expect(marks).toEqual([]);
 });
@@ -122,9 +122,13 @@ test("Vorschau wird zwischengespeichert, bearbeiteter Entwurf wird veröffentlic
   expect(marks).toEqual([[4, DONE_FLAG]]);
 });
 
-test("manuelles Veröffentlichen respektiert das Tageslimit", async () => {
+test("Richtwert erreicht: manuell veröffentlichen geht trotzdem", async () => {
   today = 3;
-  expect(pipeline().publish(3)).rejects.toThrow("Tageslimit");
+  const p = pipeline();
+  expect((await p.run()).message).toContain("Richtwert");
+  expect((await p.run(false, { manual: true })).published).toHaveLength(1);
+  await p.publish(4);
+  expect(created).toEqual(["post-3", "post-4"]);
 });
 
 test("ohne IMAP-Markierungen: erledigte Mails kommen nicht wieder", async () => {

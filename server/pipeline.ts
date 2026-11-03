@@ -197,11 +197,9 @@ export class Pipeline {
     return post;
   }
 
-  /** Manuell aus dem Dashboard veröffentlichen – das Tageslimit gilt auch hier. */
+  /** Manuell aus dem Dashboard veröffentlichen – DAILY_LIMIT ist nur ein Richtwert und bremst hier nicht. */
   publish(uid: number): Promise<{ id: number; link: string }> {
     return this.exclusive(async () => {
-      const { today, limit } = await this.remainingToday();
-      if (today >= limit) throw new Error(`Tageslimit erreicht (${today}/${limit})`);
       const mail = await this.mustGet(uid);
       const article = await this.draftFor(mail);
       if (!article.relevant) throw new Error(`Claude hält die Mail nicht für relevant: ${article.reason}`);
@@ -247,15 +245,18 @@ export class Pipeline {
     });
   }
 
-  /** Automatischer Lauf: höchstens POSTS_PER_RUN neue Beiträge, nie über DAILY_LIMIT. */
-  run(dryRun = false): Promise<RunResult> {
+  /**
+   * Lauf: höchstens POSTS_PER_RUN neue Beiträge. Der Zeitplan hält sich an den Richtwert DAILY_LIMIT,
+   * ein manueller Klick („Ausführen“) darf darüber hinaus.
+   */
+  run(dryRun = false, { manual = false } = {}): Promise<RunResult> {
     return this.exclusive(async () => {
       const result: RunResult = { published: [], skipped: 0, dryRun, previews: [], message: "" };
       try {
         const { today, limit } = await this.remainingToday();
-        const remaining = Math.min(this.cfg.limits.perRun, limit - today);
+        const remaining = manual ? this.cfg.limits.perRun : Math.min(this.cfg.limits.perRun, limit - today);
         if (remaining <= 0) {
-          result.message = `Tageslimit erreicht (${today}/${limit})`;
+          result.message = `Richtwert für heute erreicht (${today}/${limit}) – manuell geht weiterhin`;
           return result;
         }
 

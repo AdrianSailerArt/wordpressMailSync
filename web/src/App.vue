@@ -108,7 +108,7 @@ onUnmounted(() => clearInterval(timer));
 
       <dl v-if="status" class="flex gap-6 text-xs">
         <div>
-          <dt class="text-zinc-500">Heute</dt>
+          <dt class="text-zinc-500" :title="`Richtwert: ${status.limit} pro Tag – der Zeitplan hält sich daran, manuell darfst du mehr`">Heute</dt>
           <dd class="font-medium tabular-nums" :class="status.today >= status.limit && 'text-amber-600 dark:text-amber-400'">
             {{ status.today }} / {{ status.limit }}
           </dd>
@@ -151,7 +151,7 @@ onUnmounted(() => clearInterval(timer));
         </button>
         <button class="btn" :disabled="suggesting || running" @click="suggestNow">{{ suggesting ? "Schreibt …" : "Vorschlag" }}</button>
         <button class="btn" :disabled="running" @click="run(true)">Testlauf</button>
-        <button class="btn btn-primary" :disabled="running || !status || status.today >= status.limit" @click="run(false)">
+        <button class="btn btn-primary" :disabled="running || !status" @click="run(false)">
           {{ running ? "Läuft …" : "Ausführen" }}
         </button>
       </div>
@@ -200,7 +200,7 @@ onUnmounted(() => clearInterval(timer));
             ['Vorschläge', `${status.config.suggestSchedule} (${status.config.timezone})`],
             ['Veröffentlichen', status.config.autoPublish ? `${status.schedule} (${status.config.timezone})` : 'aus (AUTO_PUBLISH=false)'],
             ['Benachrichtigungen', `${status.pushSubscribers} Browser angemeldet`],
-            ['Limit', `${status.config.perRun} pro Lauf, ${status.limit} pro Tag`],
+            ['Limit', `${status.config.perRun} pro Lauf, Richtwert ${status.limit} pro Tag (nur für den Zeitplan)`],
             ['Sprachmodell', status.config.model],
             ['SEO-Plugin', status.config.seoPlugin],
             ['Kategorien', status.config.categories.join(', ')],

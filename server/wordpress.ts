@@ -1,4 +1,4 @@
-/** WordPress-REST-API: Tageslimit prüfen, Beitrag samt Bild, Tags und SEO-Meta anlegen. */
+/** WordPress-REST-API: heutige Beiträge zählen, Beitrag samt Bild, Tags und SEO-Meta anlegen. */
 
 import type { Config } from "./config.ts";
 import type { VideoInfo } from "./images.ts";

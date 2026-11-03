@@ -90,7 +90,7 @@ const api = new Hono()
     await pipeline.skip(uid(c));
     return c.json({ ok: true });
   })
-  .post("/run", async (c) => c.json(await pipeline.run(c.req.query("dryRun") === "1")))
+  .post("/run", async (c) => c.json(await pipeline.run(c.req.query("dryRun") === "1", { manual: true })))
   .post("/suggest", async (c) => c.json(await pipeline.suggest()))
   .get("/log", (c) => c.json(store.recentLog()))
   .get("/mails/:uid/trace", (c) => c.json(store.getTrace(uid(c))))

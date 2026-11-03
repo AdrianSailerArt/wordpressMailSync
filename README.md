@@ -23,8 +23,9 @@ IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ─�
       └──────────────── Mail wird per IMAP-Keyword als erledigt/übersprungen markiert ◄──────────────────┘
 ```
 
-1. **Tageslimit prüfen** – zählt die heute vom Bot-Benutzer angelegten Beiträge in WordPress.
-   Ist `DAILY_LIMIT` erreicht, passiert nichts (gilt auch für Klicks im Dashboard).
+1. **Richtwert prüfen** – zählt die heute vom Bot-Benutzer angelegten Beiträge in WordPress.
+   Ist `DAILY_LIMIT` erreicht, veröffentlicht der Zeitplan nichts mehr. Manuell im Dashboard
+   („Veröffentlichen“, „Ausführen“) darfst du jederzeit mehr – der Wert ist nur ein Richtwert.
 2. **Mails holen** – alle unbearbeiteten Mails der letzten `MAX_AGE_DAYS` Tage, neueste
    zuerst. Der Gelesen-Status bleibt unverändert.
 3. **Vorfilter** – Mails ohne Musik-Stichworte werden ohne KI-Aufruf übersprungen.
@@ -71,7 +72,7 @@ Dashboard-Tab geschlossen ist (Chrome muss laufen). Ein Klick öffnet direkt den
 
 ### 2. WordPress vorbereiten
 
-- Eigenen Benutzer anlegen, z. B. `pressbot` mit der Rolle **Autor** (das Tageslimit zählt
+- Eigenen Benutzer anlegen, z. B. `pressbot` mit der Rolle **Autor** (der Richtwert zählt
   die Beiträge dieses Benutzers).
 - Als dieser Benutzer: *Profil → Anwendungspasswörter* → neues Passwort erzeugen.
 - Für SEO-Felder: [`wordpress/pressbot-seo-meta.php`](wordpress/pressbot-seo-meta.php) nach

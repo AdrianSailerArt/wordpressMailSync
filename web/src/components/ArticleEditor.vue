@@ -217,12 +217,12 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-
     <!-- Aktionen -->
     <div class="sticky bottom-0 -mx-1 flex items-center gap-2 bg-white/90 px-1 py-3 backdrop-blur dark:bg-zinc-950/90">
       <span class="mr-auto text-xs text-zinc-500">
-        {{ dirty ? "Ungespeicherte Änderungen" : limitReached ? "Tageslimit erreicht" : article.generated_by ? `geschrieben von ${article.generated_by}` : "" }}
+        {{ dirty ? "Ungespeicherte Änderungen" : limitReached ? "Richtwert für heute erreicht – Veröffentlichen geht trotzdem" : article.generated_by ? `geschrieben von ${article.generated_by}` : "" }}
       </span>
       <button class="btn" :disabled="!dirty || !!busy" @click="emit('save', { ...draft, tags: tags() })">
         {{ busy === "save" ? "Speichert …" : "Speichern" }}
       </button>
-      <button class="btn btn-primary" :disabled="dirty || !!busy || limitReached" @click="emit('publish')">
+      <button class="btn btn-primary" :disabled="dirty || !!busy" @click="emit('publish')">
         {{ busy === "publish" ? "Veröffentlicht …" : "Veröffentlichen" }}
       </button>
     </div>
