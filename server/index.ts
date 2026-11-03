@@ -54,6 +54,7 @@ const api = new Hono()
     });
   })
   .get("/mails", async (c) => c.json(await pipeline.listMails()))
+  .get("/mails/:uid", async (c) => c.json(await pipeline.original(Number(c.req.param("uid")))))
   .post("/mails/:uid/preview", async (c) =>
     c.json(await pipeline.preview(Number(c.req.param("uid")), c.req.query("refresh") === "1")))
   .put("/mails/:uid/draft", async (c) =>

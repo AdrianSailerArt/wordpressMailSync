@@ -5,10 +5,11 @@ Releases), lässt sie von einem **lokalen Sprachmodell** als eigenständigen, SE
 Beitrag umschreiben und veröffentlicht sie über die WordPress-REST-API – **maximal 3
 Beiträge pro Tag**. Läuft komplett auf deinem Mac, ohne API-Key und ohne laufende Kosten.
 
-Mit **Vue-Dashboard**: Postfach ansehen, Beiträge vorab generieren, Titel/Meta/Text
-bearbeiten, gezielt veröffentlichen oder überspringen, Verlauf aller Aktionen.
+Mit **Vue-Dashboard** (Tailwind CSS, hell/dunkel): Postfach ansehen, Beiträge vorab generieren,
+generierten Text **wortweise mit der Original-Mail vergleichen**, Titel/Meta/Text bearbeiten,
+gezielt veröffentlichen oder überspringen, Verlauf aller Aktionen.
 
-**Stack:** [Bun](https://bun.sh) + TypeScript · Hono · bun:sqlite · Vue 3 + Vite ·
+**Stack:** [Bun](https://bun.sh) + TypeScript · Hono · bun:sqlite · Vue 3 + Vite + Tailwind CSS ·
 [Ollama](https://ollama.com) (gemma4) – optional Claude-API
 
 ## So funktioniert's

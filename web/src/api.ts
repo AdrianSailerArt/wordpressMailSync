@@ -61,6 +61,13 @@ export interface RunResult {
   message: string;
 }
 
+export interface OriginalMail {
+  subject: string;
+  sender: string;
+  date: string;
+  body: string;
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
@@ -76,6 +83,7 @@ export const api = {
   status: () => call<Status>("GET", "/status"),
   mails: () => call<MailSummary[]>("GET", "/mails"),
   log: () => call<LogEntry[]>("GET", "/log"),
+  original: (uid: number) => call<OriginalMail>("GET", `/mails/${uid}`),
   preview: (uid: number, refresh = false) => call<Article>("POST", `/mails/${uid}/preview${refresh ? "?refresh=1" : ""}`),
   saveDraft: (uid: number, article: Article) => call<Article>("PUT", `/mails/${uid}/draft`, article),
   publish: (uid: number) => call<{ id: number; link: string }>("POST", `/mails/${uid}/publish`),

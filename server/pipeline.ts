@@ -104,6 +104,12 @@ export class Pipeline {
     return mail;
   }
 
+  /** Vollständige Original-Mail für die Vergleichsansicht im Dashboard. */
+  async original(uid: number): Promise<{ subject: string; sender: string; date: string; body: string }> {
+    const { subject, sender, date, body } = await this.mustGet(uid);
+    return { subject, sender, date, body };
+  }
+
   preview(uid: number, refresh = false): Promise<Article> {
     return this.exclusive(async () => this.draftFor(await this.mustGet(uid), refresh));
   }
