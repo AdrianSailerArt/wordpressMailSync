@@ -6,6 +6,8 @@ Beitrag umschreiben und veröffentlicht sie über die WordPress-REST-API – **m
 Beiträge pro Tag**. Läuft komplett auf deinem Mac, ohne API-Key und ohne laufende Kosten.
 
 Mit **Vue-Dashboard** (Tailwind CSS, hell/dunkel): Postfach ansehen, Beiträge vorab generieren,
+die **Original-Mail so sehen wie im Mailprogramm** (abgeschottet, ohne Skripte) samt **Prüfliste**
+(Termine und Links aus der Mail gegen den Beitrag – fehlende, erfundene oder mit falschem Jahr fallen auf),
 generierten Text **wortweise mit der Original-Mail vergleichen**, Titel/Meta/Text bearbeiten,
 **Thumbnail und Bilder auswählen**, gezielt veröffentlichen oder überspringen, Verlauf aller Aktionen.
 

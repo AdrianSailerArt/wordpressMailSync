@@ -1,18 +1,12 @@
 <script setup lang="ts">
 import { diffWords } from "diff";
 import { computed, ref } from "vue";
+import { htmlToPlain } from "../facts";
 
 /** Wortweiser Vergleich Original-Mail ↔ generierter Beitrag. */
 const props = defineProps<{ original: string; html: string; title: string }>();
 
 const layout = ref<"inline" | "split">("split");
-
-/** Beitrags-HTML in Fließtext umwandeln, Absätze und Listenpunkte bleiben als Zeilen erhalten. */
-function htmlToPlain(html: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  doc.querySelectorAll("p, h2, h3, li, tr, blockquote").forEach((el) => el.append("\n"));
-  return (doc.body.textContent ?? "").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim();
-}
 
 const generated = computed(() => `${props.title}\n\n${htmlToPlain(props.html)}`);
 const parts = computed(() => diffWords(props.original.trim(), generated.value, { ignoreCase: true }));

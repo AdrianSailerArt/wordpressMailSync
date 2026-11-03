@@ -4,6 +4,7 @@ import { api, formatDate, type Article, type MailImages, type MailSummary, type 
 import { live } from "../llm";
 import ArticleEditor from "./ArticleEditor.vue";
 import LiveOutput from "./LiveOutput.vue";
+import MailView from "./MailView.vue";
 
 const props = defineProps<{ status: Status | null; openUid?: number | null }>();
 const emit = defineEmits<{ changed: []; opened: [] }>();
@@ -215,9 +216,7 @@ onMounted(load);
           @publish="publish"
         />
 
-        <div v-else class="whitespace-pre-line text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
-          {{ original?.body ?? selected.snippet + " …" }}
-        </div>
+        <MailView v-else :uid="selected.uid" :original="original" />
       </template>
     </section>
   </div>

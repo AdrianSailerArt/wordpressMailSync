@@ -137,11 +137,22 @@ export interface RunResult {
   message: string;
 }
 
+export interface MailLink {
+  url: string;
+  label: string;
+  /** dürfte nicht in den Artikel (Download, Presseordner, Hörprobe …) */
+  blocked: boolean;
+}
+
 export interface OriginalMail {
   subject: string;
   sender: string;
+  to: string;
   date: string;
   body: string;
+  hasHtml: boolean;
+  attachments: { filename: string; contentType: string; size: number }[];
+  links: MailLink[];
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -160,6 +171,12 @@ export const api = {
   mails: () => call<MailSummary[]>("GET", "/mails"),
   log: () => call<LogEntry[]>("GET", "/log"),
   original: (uid: number) => call<OriginalMail>("GET", `/mails/${uid}`),
+  originalHtmlUrl: (uid: number, images: boolean) => `/api/mails/${uid}/html${images ? "?images=1" : ""}`,
+  originalHtml: async (uid: number, images: boolean) => {
+    const res = await fetch(api.originalHtmlUrl(uid, images));
+    if (!res.ok) throw new Error(`Mail-Ansicht: ${res.status}`);
+    return res.text();
+  },
   preview: (uid: number, refresh = false) => call<Article>("POST", `/mails/${uid}/preview${refresh ? "?refresh=1" : ""}`),
   saveDraft: (uid: number, article: Article) => call<Article>("PUT", `/mails/${uid}/draft`, article),
   publish: (uid: number) => call<{ id: number; link: string }>("POST", `/mails/${uid}/publish`),

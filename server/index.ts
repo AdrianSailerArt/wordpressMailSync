@@ -7,6 +7,7 @@ import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { totalmem } from "node:os";
 import { createApp } from "./app.ts";
+import { mailCsp } from "./mail-view.ts";
 import { ArticleSchema } from "./rewrite.ts";
 
 const { cfg, store, push, events, rewriter, pipeline } = createApp();
@@ -77,6 +78,16 @@ const api = new Hono()
   })
   .get("/mails", async (c) => c.json(await pipeline.listMails()))
   .get("/mails/:uid", async (c) => c.json(await pipeline.original(uid(c))))
+  .get("/mails/:uid/html", async (c) => {
+    const images = c.req.query("images") === "1";
+    const html = await pipeline.originalHtml(uid(c), images);
+    if (html === null) return c.notFound();
+    return c.html(html, 200, {
+      "Content-Security-Policy": mailCsp(images),
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+    });
+  })
   .get("/mails/:uid/images", async (c) => c.json(await pipeline.images(uid(c))))
   .get("/mails/:uid/images/:id", async (c) => {
     const img = await pipeline.image(uid(c), c.req.param("id"));

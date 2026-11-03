@@ -12,6 +12,15 @@ const MAILS: PressMail[] = [
   {
     uid: 101, messageId: "<demo-101@example>", subject: "PRESSEINFO: Nordlicht Kollektiv – „Weite“ Tour 2027", sender: "Lena Krause <presse@sternklang-promo.de>", date: hoursAgo(2), images: [],
     body: "Das Berliner Indie-Quintett Nordlicht Kollektiv geht im Frühjahr 2027 mit seinem dritten Album „Weite“ auf Tour.\n\n12.03.2027 Hamburg – Uebel & Gefährlich\n14.03.2027 Köln – Gloria\n15.03.2027 München – Technikum\n18.03.2027 Wien – Flex\n\nTickets ab 32 € gibt es ab Freitag, 10 Uhr, unter https://tickets.example.com/nordlicht.\n\nFoto: Jana Weiss",
+    to: "redaktion@example.com",
+    attachments: [{ filename: "Nordlicht_Pressefoto.jpg", contentType: "image/jpeg", size: 2_480_000 }],
+    html: `<table width="600" align="center" style="font-family:Georgia,serif"><tr><td style="background:#1e293b;color:#fff;padding:24px;font-size:22px">STERNKLANG PROMOTION</td></tr>
+<tr><td style="padding:24px"><h2 style="margin-top:0">Nordlicht Kollektiv – „Weite“ Tour 2027</h2>
+<p>Das Berliner Indie-Quintett <b>Nordlicht Kollektiv</b> geht im Frühjahr 2027 mit seinem dritten Album „Weite“ auf Tour.</p>
+<table cellpadding="4"><tr><td>12.03.2027</td><td>Hamburg</td><td>Uebel &amp; Gefährlich</td></tr><tr><td>14.03.2027</td><td>Köln</td><td>Gloria</td></tr><tr><td>15.03.2027</td><td>München</td><td>Technikum</td></tr><tr><td>18.03.2027</td><td>Wien</td><td>Flex</td></tr></table>
+<p>Tickets ab 32 € gibt es ab Freitag, 10 Uhr, unter <a href="https://tickets.example.com/nordlicht">tickets.example.com</a>.</p>
+<p><a href="https://wetransfer.com/downloads/abc">Pressefotos herunterladen</a> · <a href="https://example.com/unsubscribe">Abmelden</a></p>
+<p style="color:#64748b;font-size:12px">Foto: Jana Weiss</p><script>alert(1)</script></td></tr></table>`,
   },
   {
     uid: 102, messageId: "<demo-102@example>", subject: "Neue Single: Mira Sol – „Glas“ (VÖ 14.11.)", sender: "Label Kontor <promo@labelkontor.example>", date: hoursAgo(20), images: [],

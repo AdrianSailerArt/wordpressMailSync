@@ -21,6 +21,8 @@ export interface ImageAttachment {
   data: Buffer;
   /** im HTML eingebettet (cid:) statt als echter Anhang */
   inline?: boolean;
+  /** Content-ID, über die das HTML das Bild als cid: einbindet */
+  cid?: string;
 }
 
 export interface PressMail {
@@ -31,6 +33,12 @@ export interface PressMail {
   sender: string;
   date: string;
   body: string;
+  /** Empfänger (An) */
+  to?: string;
+  /** Original-HTML der Mail, für die Anzeige im Dashboard */
+  html?: string;
+  /** Alle Anhänge (nur Name, Typ, Größe) */
+  attachments?: { filename: string; contentType: string; size: number }[];
   /** Bild-Anhänge und eingebettete Bilder (ungefiltert – Logos sortiert images.ts aus) */
   images: ImageAttachment[];
   /** Im HTML verlinkte Bilder (<img src>, Links auf .jpg/.png/.webp) */
@@ -110,7 +118,8 @@ export async function parseMessage(uid: number, source: Buffer): Promise<PressMa
   const body = parsed.html ? htmlToText(parsed.html) : (parsed.text ?? "");
   const images = parsed.attachments
     .filter((a) => IMAGE_TYPES.includes(a.contentType))
-    .map((a) => ({ filename: a.filename ?? "bild.jpg", contentType: a.contentType, data: a.content, inline: !!a.related }));
+    .map((a) => ({ filename: a.filename ?? "bild.jpg", contentType: a.contentType, data: a.content, inline: !!a.related, cid: a.cid }));
+  const to = [parsed.to].flat().filter((a) => !!a).map((a) => a!.text).join(", ");
 
   return {
     uid,
@@ -119,6 +128,9 @@ export async function parseMessage(uid: number, source: Buffer): Promise<PressMa
     sender: parsed.from?.text ?? "",
     date: parsed.date?.toISOString() ?? "",
     body: body.trim().slice(0, MAX_BODY_CHARS),
+    to,
+    html: parsed.html || undefined,
+    attachments: parsed.attachments.filter((a) => !a.related).map((a) => ({ filename: a.filename ?? "anhang", contentType: a.contentType, size: a.size })),
     images,
     ...(parsed.html ? extractImageLinks(parsed.html) : { videoIds: extractImageLinks(parsed.text ?? "").videoIds }),
   };

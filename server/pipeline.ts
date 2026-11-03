@@ -3,6 +3,7 @@
 import type { Config } from "./config.ts";
 import type { LogKind, Store } from "./db.ts";
 import type { ImageInfo, MailImages, VideoInfo } from "./images.ts";
+import { originalMail, renderMailHtml, type OriginalMail } from "./mail-view.ts";
 import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type ImageAttachment, type PressMail } from "./mail.ts";
 import { cleanArticle, type Article } from "./rewrite.ts";
 
@@ -164,9 +165,14 @@ export class Pipeline {
   }
 
   /** Vollständige Original-Mail für die Vergleichsansicht im Dashboard. */
-  async original(uid: number): Promise<{ subject: string; sender: string; date: string; body: string }> {
-    const { subject, sender, date, body } = await this.mustGet(uid);
-    return { subject, sender, date, body };
+  async original(uid: number): Promise<OriginalMail> {
+    return originalMail(await this.mustGet(uid));
+  }
+
+  /** Mail-HTML für die formatierte Ansicht (null bei reinen Text-Mails). */
+  async originalHtml(uid: number, remoteImages = false): Promise<string | null> {
+    const mail = await this.mustGet(uid);
+    return mail.html ? renderMailHtml(mail, remoteImages) : null;
   }
 
   preview(uid: number, refresh = false): Promise<Article> {

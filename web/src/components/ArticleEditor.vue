@@ -2,6 +2,7 @@
 import { computed, ref, toRaw, watch } from "vue";
 import { api, type Article, type MailImages, type OriginalMail } from "../api";
 import MailCompare from "./MailCompare.vue";
+import MailView from "./MailView.vue";
 import TraceView from "./TraceView.vue";
 
 const props = defineProps<{
@@ -205,7 +206,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-
 
       <template v-else-if="view === 'original' || view === 'compare'">
         <p v-if="!original" class="text-sm text-zinc-500">Original wird geladen …</p>
-        <div v-else-if="view === 'original'" class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">{{ original.body }}</div>
+        <MailView v-else-if="view === 'original'" :uid="uid" :original="original" :article="draft" />
         <MailCompare v-else :original="original.body" :html="draft.content_html" :title="draft.title" />
       </template>
 
