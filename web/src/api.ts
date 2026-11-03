@@ -165,6 +165,70 @@ export interface OriginalMail {
   links: MailLink[];
 }
 
+export interface KonzertEvent {
+  uid: string;
+  source: string;
+  date: string;
+  time: string;
+  artists: string[];
+  title: string;
+  venue: string;
+  city: string;
+  country: string;
+  info: string;
+  url: string;
+  status: string;
+}
+
+export interface KalenderSource {
+  id: string;
+  name: string;
+  found: number;
+  sent: number;
+  error?: string;
+  skipped?: string;
+  sendError?: string;
+  duplicates?: number;
+  wp?: { created: number; updated: number; locked: number; deleted: number; invalid: number };
+}
+
+export interface KalenderResult {
+  at: string;
+  dryRun: boolean;
+  transferredAt?: string;
+  transferredUids?: string[];
+  sources: KalenderSource[];
+  events: KonzertEvent[];
+}
+
+export type EventState = "neu" | "unverändert" | "geändert" | "dublette" | "gesperrt";
+
+export interface WpRef {
+  id: number;
+  uid: string;
+  source: string;
+  title: string;
+  post_status: string;
+  edit_link: string;
+}
+
+export interface Abgleich {
+  at: string;
+  total: number;
+  checks: { uid: string; state: EventState; existing?: WpRef; changes?: string[] }[];
+  removals: (Pick<WpRef, "id" | "uid" | "source" | "title" | "edit_link"> & { date: string })[];
+  wpDuplicates: [KonzertEvent & WpRef, KonzertEvent & WpRef][];
+}
+
+export interface KalenderState {
+  busy: boolean;
+  progress: { task: "abrufen" | "übertragen"; total: number; done: number; current: string; lines: string[]; startedAt: string; cancelling?: boolean } | null;
+  nextRun: string | null;
+  config: { schedule: string; auto: boolean; postStatus: string; ticketmaster: boolean; wpUrl: string };
+  sources: { id: string; name: string; typ: "seite" | "vaddi" | "z7" | "ticketmaster"; url: string }[];
+  last: KalenderResult | null;
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
@@ -199,6 +263,13 @@ export const api = {
   models: () => call<ModelsResponse>("GET", "/llm/models"),
   setModel: (model: string) => call<{ current: string }>("PUT", "/llm/model", { model }),
   trace: (uid: number) => call<LlmTrace | null>("GET", `/mails/${uid}/trace`),
+  kalender: () => call<KalenderState>("GET", "/kalender"),
+  kalenderRun: (dryRun: boolean, only: string[] = []) =>
+    call<{ started: true }>("POST", `/kalender/run?dryRun=${dryRun ? 1 : 0}${only.length ? `&only=${only.join(",")}` : ""}`),
+  kalenderCancel: () => call<{ cancelled: boolean }>("POST", "/kalender/cancel"),
+  kalenderAbgleich: () => call<Abgleich>("GET", "/kalender/abgleich"),
+  /** ohne uids: alle Termine (ersetzt die Quellen), mit uids: nur diese ergänzen */
+  kalenderTransfer: (uids?: string[]) => call<{ started: true }>("POST", "/kalender/transfer", uids?.length ? { uids } : {}),
 };
 
 export const formatDate = (iso: string | null) =>

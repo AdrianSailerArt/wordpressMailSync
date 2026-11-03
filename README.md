@@ -123,12 +123,69 @@ sh scripts/autostart-macos.sh            # einrichten
 sh scripts/autostart-macos.sh --remove   # wieder entfernen
 ```
 
+## Konzertkalender
+
+Eine Liste kommender Konzerte im Raum Freiburg – Karlsruhe – Schweiz auf der WordPress-Seite.
+Der Abholer liest Veranstalter-Seiten, Vaddi Concerts und die Ticketmaster-API und schickt die
+Termine an das Plugin [`wordpress/konzertkalender`](wordpress/konzertkalender/konzertkalender.php).
+Jeder Termin hat Location, Künstler, Datum/Beginn und einen Freitext (Preis, Einlass, Support …).
+
+```
+Club-Seiten ──► Sprachmodell liest Termine ──┐
+Vaddi Concerts ──► fester Parser ────────────┼──► Dubletten zusammenführen ──► WordPress-Plugin ──► [konzertkalender]
+Ticketmaster Discovery API ──────────────────┘
+```
+
+**Einrichten**
+
+1. `bun run kalender:plugin` erzeugt `wordpress/konzertkalender.zip` → in WordPress unter
+   *Plugins → Installieren → Plugin hochladen* hochladen und aktivieren.
+2. Auf einer Seite den Shortcode einfügen, z. B. `[konzertkalender tage="90" filter="ja"]`.
+   Weitere Möglichkeiten: `land="DE,CH"`, `ort="Freiburg,Basel"`, `location="Jazzhaus"`, `limit="200"`.
+   **Seitenleiste:** unter *Design → Widgets* das Widget „Konzertkalender“ hinzufügen (Anzahl, Zeitraum, Orte,
+   Länder und Link „Alle Konzerte“ einstellbar) – oder überall kompakt per Shortcode:
+   `[konzertkalender kompakt="ja" anzahl="8" link="/konzerte/"]`.
+3. Optional einen kostenlosen Ticketmaster-Schlüssel holen ([developer.ticketmaster.com](https://developer.ticketmaster.com),
+   „Consumer Key“) und als `TICKETMASTER_API_KEY` in die `.env` eintragen. Ohne Schlüssel wird Ticketmaster übersprungen.
+4. Probelauf ohne Übertragen: `bun run kalender --dry-run` – einzelne Quellen: `bun run kalender --dry-run vaddi jazzhaus`.
+5. Übertragen: `bun run kalender`. Täglich automatisch mit `KALENDER_AUTO=true` (Standard 6:30 Uhr,
+   `KALENDER_SCHEDULE`), solange der Server läuft. Im Dashboard-Server auch über `POST /api/kalender/run`.
+
+**Quellen** stehen in [`kalender/quellen.json`](kalender/quellen.json): neue Club-Seite mit
+`"typ": "seite"`, Adresse, Location, Ort und Land eintragen – mehr braucht es nicht. Dort stehen auch das
+Gebiet (Kreise für Ticketmaster), die Orte für Vaddi und Stichworte zum Ausschließen. Die Reihenfolge der
+Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen ergänzen nur fehlende Angaben.
+
+**Wie verlässlich ist das?**
+
+- Das Sprachmodell darf nur Termine liefern, deren Datum und Künstler sich im Seitentext wiederfinden;
+  Vergangenes fliegt raus. Trotzdem lohnt anfangs ein Blick – oder `KALENDER_STATUS=draft`, dann sind neue
+  Termine in WordPress erst Entwurf.
+- Fehlerhafte Termine in WordPress korrigieren und *„Nicht automatisch überschreiben“* anhaken – dann lässt
+  der Abruf sie in Ruhe. Ausblenden: Termin auf Entwurf setzen, das bleibt beim nächsten Abruf so.
+- Liefert eine Quelle keine Termine oder einen Fehler, bleiben ihre bisherigen Termine stehen. Sonst ersetzt jeder
+  Abruf die künftigen Termine der Quelle (Abgesagtes verschwindet). Termine, die länger als 7 Tage vorbei sind,
+  löscht das Plugin täglich.
+- Vaddi veranstaltet auch Comedy und Lesungen; die werden anhand der Beschreibung aussortiert (Musik- gegen
+  Bühnenprogramm-Begriffe). Grenzfälle wie Musikkabarett können in beide Richtungen fallen.
+- Seiten, die ihr Programm per JavaScript nachladen oder eine Bot-Sperre haben, liefern keinen Text – dafür
+  bräuchte es einen eigenen Weg. Die Festhalle Durlach ist deshalb nicht in der Liste.
+- **Eventim/Ticketcorner** blocken automatisierte Abrufe und verbieten sie in den AGB – deshalb nicht dabei.
+  Offiziell geht es nur über deren Partnerprogramm (Produkt-Feed).
+- Ticketmaster erlaubt das Zwischenspeichern nur „für angemessene Zeit“ – der tägliche Abgleich hält die Daten aktuell.
+
+**REST-API des Plugins** (Anwendungspasswort wie oben, Benutzer mit „Beiträge bearbeiten“):
+`POST /wp-json/konzertkalender/v1/sync` mit `{ "source": "…", "replace": true, "events": [ … ] }`,
+öffentlich lesbar: `GET /wp-json/konzertkalender/v1/events?tage=30&land=CH`.
+
 ## Weitere Befehle
 
 | Befehl | Zweck |
 |---|---|
 | `bun run serve` | nur Server starten, ohne das Dashboard neu zu bauen |
 | `bun run once` / `bun run once --dry-run` | einmaliger Lauf ohne Dashboard |
+| `bun run kalender` / `--dry-run` | Konzertkalender abrufen und übertragen |
+| `bun run kalender:plugin` | WordPress-Plugin als Zip zum Hochladen |
 | `bun run dev` | Entwicklung mit Hot-Reload (Dashboard auf :5173) |
 | `bun test` · `bun run typecheck` | Tests und Typprüfung |
 
@@ -161,7 +218,8 @@ stil/        Stil-Regelwerk der Redaktion
 web/         Vue-3-Dashboard (Vite, Tailwind) inkl. Service Worker für Push
 tests/       bun test
 scripts/     Autostart für macOS
-wordpress/   MU-Plugin für die SEO-Felder
+wordpress/   MU-Plugin für die SEO-Felder, Plugin „Konzertkalender“
+kalender/    Quellen und Gebiet des Konzertkalenders (server/kalender/: Abholer)
 ```
 
 ## Hinweise

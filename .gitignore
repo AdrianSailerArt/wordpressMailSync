@@ -4,3 +4,4 @@ web/dist/
 data/
 *.sqlite
 .DS_Store
+wordpress/*.zip

@@ -1,0 +1,32 @@
+{
+  "gebiet": [
+    { "name": "Freiburg", "lat": 47.9990, "lon": 7.8421, "radiusKm": 60 },
+    { "name": "Karlsruhe", "lat": 49.0069, "lon": 8.4037, "radiusKm": 45 },
+    { "name": "Basel", "lat": 47.5596, "lon": 7.5886, "radiusKm": 40 },
+    { "name": "Zürich/Winterthur", "lat": 47.4400, "lon": 8.6500, "radiusKm": 50 }
+  ],
+  "orte": {
+    "Freiburg": "DE", "Emmendingen": "DE", "Waldkirch": "DE", "Breisach": "DE", "Bad Krozingen": "DE",
+    "Staufen": "DE", "Müllheim": "DE", "Titisee-Neustadt": "DE", "Lörrach": "DE", "Weil am Rhein": "DE",
+    "Rheinfelden": "DE", "Lahr": "DE", "Offenburg": "DE", "Kehl": "DE", "Achern": "DE", "Bühl": "DE",
+    "Baden-Baden": "DE", "Rastatt": "DE", "Gaggenau": "DE", "Ettlingen": "DE", "Karlsruhe": "DE",
+    "Bruchsal": "DE", "Pforzheim": "DE", "Villingen-Schwenningen": "DE", "Donaueschingen": "DE",
+    "Basel": "CH", "Pratteln": "CH", "Liestal": "CH", "Zürich": "CH", "Winterthur": "CH",
+    "Schaffhausen": "CH", "Baden": "CH", "Aarau": "CH", "Strasbourg": "FR", "Straßburg": "FR"
+  },
+  "ausschliessen": ["Comedy", "Comedian", "Stand-Up", "Stand Up", "Kabarett", "Satire", "Lesung", "liest", "Poetry Slam", "Zauber", "Vortrag", "Ballett", "Hundeprofi", "Kino"],
+  "quellen": [
+    { "typ": "seite", "id": "jazzhaus", "name": "Jazzhaus", "url": "https://www.jazzhaus.de/programm", "location": "Jazzhaus", "ort": "Freiburg", "land": "DE" },
+    { "typ": "seite", "id": "atlantik", "name": "Café Atlantik", "url": "https://www.cafe-atlantik.de/", "location": "Café Atlantik", "ort": "Freiburg", "land": "DE" },
+    { "typ": "seite", "id": "taptab", "name": "TapTab", "url": "https://www.taptab.ch/", "location": "TapTab", "ort": "Schaffhausen", "land": "CH" },
+    { "typ": "seite", "id": "gaswerk", "name": "Gaswerk", "url": "https://gaswerk.ch/programm/programm", "location": "Gaswerk", "ort": "Winterthur", "land": "CH" },
+    { "typ": "seite", "id": "kraftfeld", "name": "Kraftfeld", "url": "https://www.kraftfeld.ch/", "location": "Kraftfeld", "ort": "Winterthur", "land": "CH" },
+    { "typ": "seite", "id": "salzhaus", "name": "Salzhaus", "url": "https://www.salzhaus.ch/", "location": "Salzhaus", "ort": "Winterthur", "land": "CH" },
+    { "typ": "seite", "id": "pmc-erasme", "name": "P.M.C. Salle Erasme", "url": "http://strasbourg.aujourdhui.fr/etudiant/lieu/p-m-c-salle-erasme.html", "location": "P.M.C. Salle Erasme", "ort": "Strasbourg", "land": "FR" },
+    { "typ": "seite", "id": "karlstorbahnhof", "name": "Karlstorbahnhof", "url": "https://www.karlstorbahnhof.de/", "location": "Karlstorbahnhof", "ort": "Heidelberg", "land": "DE" },
+    { "typ": "seite", "id": "cafe-central", "name": "Café Central", "url": "https://www.cafecentral.de/", "location": "Café Central", "ort": "Weinheim", "land": "DE" },
+    { "typ": "z7", "id": "z7", "name": "Konzertfabrik Z7", "url": "https://z-7.ch/" },
+    { "typ": "vaddi", "id": "vaddi", "name": "Vaddi Concerts", "url": "https://www.vaddi-concerts.de/" },
+    { "typ": "ticketmaster", "id": "ticketmaster", "name": "Ticketmaster" }
+  ]
+}

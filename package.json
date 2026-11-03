@@ -12,6 +12,8 @@
     "start": "bun run build && bun run serve",
     "serve": "bun run server/index.ts",
     "once": "bun run server/cli.ts",
+    "kalender": "bun run server/kalender-cli.ts",
+    "kalender:plugin": "cd wordpress && rm -f konzertkalender.zip && zip -r konzertkalender.zip konzertkalender",
     "typecheck": "tsc --noEmit -p . && vue-tsc --noEmit -p web",
     "test": "bun test"
   },

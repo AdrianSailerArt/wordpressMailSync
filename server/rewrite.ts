@@ -286,7 +286,8 @@ interface Generated {
 
 /** Rohes JSON von Ollama holen – gestreamt, damit das Dashboard live mitlesen kann. */
 async function generateOllama(
-  cfg: Config["llm"], model: string, system: string, user: string, schema: object, onToken: (t: string) => void,
+  cfg: Config["llm"], model: string, system: string, user: string, schema: object, onToken: (t: string) => void, temperature = 0.4,
+  abort?: AbortSignal,
 ): Promise<Generated> {
   const started = Date.now();
   const res = await fetch(`${cfg.ollamaUrl}/api/chat`, {
@@ -299,10 +300,11 @@ async function generateOllama(
       stream: true,
       think: false,
       keep_alive: "10m",
-      options: { temperature: 0.4, num_ctx: 16384 },
+      options: { temperature, num_ctx: 16384 },
     }),
-    signal: AbortSignal.timeout(10 * 60_000),
+    signal: abort ? AbortSignal.any([abort, AbortSignal.timeout(10 * 60_000)]) : AbortSignal.timeout(10 * 60_000),
   }).catch((err) => {
+    if (abort?.aborted) throw err;
     throw new Error(`Ollama nicht erreichbar unter ${cfg.ollamaUrl} – läuft die Ollama-App? (${err})`);
   });
   if (!res.ok) throw new Error(`Ollama: ${res.status} ${(await res.text()).slice(0, 300)}`);
@@ -345,7 +347,7 @@ async function generateOllama(
   };
 }
 
-async function generateClaude(cfg: Config["llm"], system: string, user: string, schema: object): Promise<Generated> {
+async function generateClaude(cfg: Config["llm"], system: string, user: string, schema: object, abort?: AbortSignal): Promise<Generated> {
   const started = Date.now();
   const client = new Anthropic();
   const response = await client.beta.messages.create({
@@ -357,13 +359,27 @@ async function generateClaude(cfg: Config["llm"], system: string, user: string, 
     // Bei einer Ablehnung durch Sicherheitsfilter automatisch auf ein Fallback-Modell ausweichen
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
-  });
+  }, { signal: abort });
   const stats = { ms: Date.now() - started, promptTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens };
   if (response.stop_reason === "refusal") return { raw: null, stats };
   if (response.stop_reason === "max_tokens") throw new Error("Antwort von Claude wurde abgeschnitten (max_tokens)");
   const text = response.content.find((b) => b.type === "text");
   if (!text || text.type !== "text") throw new Error("Keine Textantwort von Claude");
   return { raw: text.text, stats };
+}
+
+/**
+ * JSON nach Schema vom eingestellten Modell holen – ohne Live-Ausgabe und mit Temperatur 0, weil es ums
+ * Herauslesen geht, nicht ums Formulieren (z. B. für den Konzertkalender).
+ */
+export async function generateJson(
+  cfg: Config["llm"], model: string, system: string, user: string, schema: object, abort?: AbortSignal,
+): Promise<unknown> {
+  const { raw } = cfg.provider === "claude"
+    ? await generateClaude(cfg, system, user, schema, abort)
+    : await generateOllama(cfg, model, system, user, schema, () => {}, 0, abort);
+  if (raw === null) throw new Error("Das Modell hat die Anfrage abgelehnt");
+  return JSON.parse(raw);
 }
 
 /** Stil-Regelwerk der Redaktion (Markdown), wird an die Schreib-Anweisung angehängt. */

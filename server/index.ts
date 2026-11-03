@@ -7,6 +7,8 @@ import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { totalmem } from "node:os";
 import { createApp } from "./app.ts";
+import { loadKalenderConfig } from "./config.ts";
+import { Kalender, type KalenderResult } from "./kalender/sync.ts";
 import { mailCsp } from "./mail-view.ts";
 import { ArticleSchema } from "./rewrite.ts";
 
@@ -34,6 +36,44 @@ const suggestJob = new Cron(cfg.limits.suggestSchedule, { timezone: cfg.limits.t
     console.error(`[Vorschlag] Fehler: ${message(err)}`);
   }
 });
+
+/** Konzertkalender (täglich, wenn KALENDER_AUTO=true) – Veranstalter-Seiten, Vaddi, Ticketmaster → WordPress-Plugin. */
+const kalenderCfg = loadKalenderConfig();
+const kalender = new Kalender(kalenderCfg, () => rewriter.model);
+const lastKalender = (): KalenderResult | null => JSON.parse(store.getSetting("kalender_last") ?? "null");
+/** `selected`: Anzahl einzeln übertragener Termine */
+const saveKalender = (result: KalenderResult, selected?: number) => {
+  store.setSetting("kalender_last", JSON.stringify(result));
+  const failed = result.sources.filter((s) => s.error || s.sendError);
+  const what = selected ? `${selected} ausgewählte Termine übertragen` : `${result.events.length} Termine${result.dryRun ? " (Probelauf)" : " übertragen"}`;
+  store.log(failed.length ? "error" : "run", "Konzertkalender",
+    `${what}${failed.length ? ` – Fehler bei ${failed.map((s) => s.name).join(", ")}` : ""}`);
+  return result;
+};
+const kalenderLog = (line: string) => console.log(`[Kalender] ${line}`);
+const runKalender = async (dryRun = false, only?: string[]) => {
+  const result = await kalender.run({ dryRun, only, log: kalenderLog });
+  // Einzeltest oder Abbruch: nur die fertigen Quellen ersetzen, die übrigen behalten ihr voriges Ergebnis
+  if (result.cancelled) store.log("run", "Konzertkalender", `Abgebrochen nach ${result.sources.length} Quellen – nichts übertragen`);
+  return saveKalender(only?.length || result.cancelled ? kalender.combine(lastKalender(), result) : result);
+};
+/** Abruf dauert mit dem lokalen Modell viele Minuten – im Hintergrund, das Dashboard fragt den Fortschritt ab. */
+const inBackground = (task: () => Promise<unknown>) => {
+  if (kalender.busy) throw new Error("Der Kalender wird gerade schon abgerufen");
+  task().catch((err) => {
+    console.error(`[Kalender] Fehler: ${message(err)}`);
+    store.log("error", "Konzertkalender", message(err));
+  });
+};
+const kalenderJob = kalenderCfg.auto
+  ? new Cron(kalenderCfg.schedule, { timezone: kalenderCfg.timezone, protect: true }, async () => {
+      try {
+        await runKalender();
+      } catch (err) {
+        console.error(`[Kalender] Fehler: ${message(err)}`);
+      }
+    })
+  : null;
 
 const app = new Hono();
 
@@ -163,6 +203,34 @@ const api = new Hono()
       }
       unsubscribe();
     }))
+  .get("/kalender", (c) => c.json({
+    busy: kalender.busy,
+    progress: kalender.progress,
+    nextRun: kalenderJob?.nextRun()?.toISOString() ?? null,
+    config: { schedule: kalenderCfg.schedule, auto: kalenderCfg.auto, postStatus: kalenderCfg.postStatus, ticketmaster: !!kalenderCfg.ticketmasterKey, wpUrl: kalenderCfg.wp.url },
+    sources: kalender.sources(),
+    last: lastKalender(),
+  }))
+  .post("/kalender/run", (c) => {
+    const only = c.req.query("only")?.split(",").filter(Boolean);
+    inBackground(() => runKalender(c.req.query("dryRun") === "1", only));
+    return c.json({ started: true }, 202);
+  })
+  .post("/kalender/cancel", (c) => c.json({ cancelled: kalender.cancel() }))
+  // Vergleich des letzten Abrufs mit dem Bestand in WordPress (Dubletten, Änderungen, was wegfiele)
+  .get("/kalender/abgleich", async (c) => {
+    const last = lastKalender();
+    if (!last) return c.json({ error: "Noch kein Abruf vorhanden" }, 400);
+    return c.json(await kalender.abgleich(last));
+  })
+  // letzten Abruf übertragen, ohne die Seiten noch einmal zu lesen – alle oder nur { uids: [...] }
+  .post("/kalender/transfer", async (c) => {
+    const last = lastKalender();
+    if (!last) return c.json({ error: "Noch kein Abruf vorhanden" }, 400);
+    const { uids } = (await c.req.json().catch(() => ({}))) as { uids?: string[] };
+    inBackground(async () => saveKalender(await kalender.transfer(last, kalenderLog, uids), uids?.length));
+    return c.json({ started: true }, 202);
+  })
   .get("/push/key", (c) => c.json({ publicKey: push.publicKey }))
   .post("/push/subscribe", async (c) => {
     push.subscribe(await c.req.json());
@@ -183,6 +251,7 @@ app.get("*", serveStatic({ path: "./web/dist/index.html" }));
 
 console.log(`Dashboard: http://${cfg.server.host}:${cfg.server.port}`);
 console.log(`Vorschläge: „${cfg.limits.suggestSchedule}“ – nächster ${at(suggestJob)}`);
+console.log(kalenderJob ? `Konzertkalender: „${kalenderCfg.schedule}“ – nächster ${at(kalenderJob)}` : "Konzertkalender: nur von Hand (KALENDER_AUTO=false)");
 console.log(publishJob ? `Veröffentlichen: „${cfg.limits.schedule}“ – nächstes ${at(publishJob)}` : "Automatisches Veröffentlichen ist aus (AUTO_PUBLISH=false)");
 
 export default {

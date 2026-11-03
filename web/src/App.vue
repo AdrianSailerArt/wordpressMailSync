@@ -6,10 +6,12 @@ import InboxView from "./components/InboxView.vue";
 import ModelPicker from "./components/ModelPicker.vue";
 import { connectLive, live, stageLabel } from "./llm";
 import LogList from "./components/LogList.vue";
+import KalenderView from "./components/KalenderView.vue";
 
-type Tab = "inbox" | "log" | "settings";
+type Tab = "inbox" | "kalender" | "log" | "settings";
 const tabs: { id: Tab; label: string }[] = [
   { id: "inbox", label: "Postfach" },
+  { id: "kalender", label: "Konzertkalender" },
   { id: "log", label: "Verlauf" },
   { id: "settings", label: "Einstellungen" },
 ];
@@ -187,6 +189,7 @@ onUnmounted(() => clearInterval(timer));
       </section>
 
       <InboxView v-if="tab === 'inbox'" :key="'inbox' + refreshKey" :status="status" :open-uid="openUid" @changed="onChanged" @opened="openUid = null" />
+      <KalenderView v-else-if="tab === 'kalender'" />
       <LogList v-else-if="tab === 'log'" :key="'log' + refreshKey" />
       <section v-else-if="status" class="max-w-xl text-sm">
         <h2 class="eyebrow mb-3">Sprachmodell</h2>

@@ -59,18 +59,43 @@ export type ImapAccount = ReturnType<typeof imapAccounts>[number];
 export type SeoPlugin = "yoast" | "rankmath" | "none";
 export type LlmProvider = "ollama" | "claude";
 
+function llmConfig(provider: LlmProvider) {
+  // den Key liest das Anthropic-SDK selbst, hier nur auf Vorhandensein prüfen
+  if (provider === "claude") env("ANTHROPIC_API_KEY");
+  return {
+    provider,
+    ollamaUrl: env("OLLAMA_URL", "http://127.0.0.1:11434").replace(/\/+$/, ""),
+    ollamaModel: env("OLLAMA_MODEL", "gemma4"),
+    claudeModel: env("CLAUDE_MODEL", "claude-opus-5-5"),
+    siteName: env("SITE_NAME", "Musikblog"),
+    siteTone: env("SITE_TONE", "locker und kompetent"),
+    // Stil-Regelwerk der Redaktion (Markdown) – leer lassen, um keins zu verwenden
+    styleFile: env("STYLE_FILE", "stil/regelwerk.md"),
+  };
+}
+
+const wpUrl = () => env("WP_URL").replace(/\/+$/, "").replace(/^(?!https?:\/\/)(?=.)/, "https://");
+
+function reportMissing() {
+  if (!missing.length) return;
+  console.error(
+    `\nEs fehlen Einstellungen: ${missing.join(", ")}\n\n` +
+      "→ .env.example nach .env kopieren und ausfüllen:  cp .env.example .env\n" +
+      "→ oder ohne Zugangsdaten ausprobieren:          DEMO=1 bun run start\n",
+  );
+  process.exit(1);
+}
+
 export function loadConfig() {
   missing.length = 0;
   const provider = env("LLM_PROVIDER", "ollama").toLowerCase() as LlmProvider;
-  // den Key liest das Anthropic-SDK selbst, hier nur auf Vorhandensein prüfen
-  if (provider === "claude") env("ANTHROPIC_API_KEY");
   const config = {
     imap: {
       accounts: imapAccounts(),
       maxAgeDays: Number(env("MAX_AGE_DAYS", "7")),
     },
     wp: {
-      url: env("WP_URL").replace(/\/+$/, "").replace(/^(?!https?:\/\/)(?=.)/, "https://"),
+      url: wpUrl(),
       user: env("WP_USER"),
       appPassword: env("WP_APP_PASSWORD"),
       status: env("WP_STATUS", "publish") as "publish" | "draft" | "pending",
@@ -88,16 +113,7 @@ export function loadConfig() {
       // 10 automatische Vorschläge pro Tag, grob alle 1,5 Stunden
       suggestSchedule: env("SUGGEST_SCHEDULE", "0 8,9,11,12,14,15,17,18,20,21 * * *"),
     },
-    llm: {
-      provider,
-      ollamaUrl: env("OLLAMA_URL", "http://127.0.0.1:11434").replace(/\/+$/, ""),
-      ollamaModel: env("OLLAMA_MODEL", "gemma4"),
-      claudeModel: env("CLAUDE_MODEL", "claude-opus-5-5"),
-      siteName: env("SITE_NAME", "Musikblog"),
-      siteTone: env("SITE_TONE", "locker und kompetent"),
-      // Stil-Regelwerk der Redaktion (Markdown) – leer lassen, um keins zu verwenden
-      styleFile: env("STYLE_FILE", "stil/regelwerk.md"),
-    },
+    llm: llmConfig(provider),
     server: {
       host: env("HOST", "127.0.0.1"),
       port: Number(env("PORT", "3210")),
@@ -107,15 +123,31 @@ export function loadConfig() {
     },
   };
 
-  if (missing.length) {
-    console.error(
-      `\nEs fehlen Einstellungen: ${missing.join(", ")}\n\n` +
-        "→ .env.example nach .env kopieren und ausfüllen:  cp .env.example .env\n" +
-        "→ oder ohne Zugangsdaten ausprobieren:          DEMO=1 bun run start\n",
-    );
-    process.exit(1);
-  }
+  reportMissing();
   return config;
 }
 
 export type Config = ReturnType<typeof loadConfig>;
+
+/** Konzertkalender: braucht nur WordPress und das Sprachmodell, kein Postfach. */
+export function loadKalenderConfig() {
+  missing.length = 0;
+  const provider = env("LLM_PROVIDER", "ollama").toLowerCase() as LlmProvider;
+  const config = {
+    wp: { url: wpUrl(), user: env("WP_USER"), appPassword: env("WP_APP_PASSWORD") },
+    llm: llmConfig(provider),
+    timezone: env("TIMEZONE", "Europe/Berlin"),
+    // Quellen (Veranstalter, Clubs) und Gebiet für Ticketmaster
+    file: env("KALENDER_FILE", "kalender/quellen.json"),
+    // kostenloser Schlüssel: developer.ticketmaster.com – leer lassen, um Ticketmaster auszulassen
+    ticketmasterKey: env("TICKETMASTER_API_KEY", ""),
+    // neue Termine sofort zeigen (publish) oder erst prüfen (draft)
+    postStatus: env("KALENDER_STATUS", "publish") as "publish" | "draft",
+    auto: bool("KALENDER_AUTO", false),
+    schedule: env("KALENDER_SCHEDULE", "30 6 * * *"),
+  };
+  reportMissing();
+  return config;
+}
+
+export type KalenderConfig = ReturnType<typeof loadKalenderConfig>;
