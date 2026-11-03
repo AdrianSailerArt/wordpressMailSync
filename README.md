@@ -1,4 +1,12 @@
-# WordPress Mail Sync 🎸
+# Bühnenpost 🎸
+
+**Pressemitteilungen & Konzertkalender für WordPress** – zwei Werkzeuge in einem Dashboard:
+
+- **Postfach → Beiträge:** Musik-Pressemitteilungen aus dem Postfach werden zu eigenständigen, SEO-optimierten Beiträgen.
+- **Konzertkalender:** Termine von Clubs, Veranstaltern und Ticketmaster im Raum Freiburg – Karlsruhe – Schweiz,
+  abgeglichen und ohne Dubletten in WordPress, als Liste und Seitenleisten-Widget.
+
+## Pressemitteilungen
 
 Liest dein IMAP-Postfach nach Pressemitteilungen zu Musik (Tourdaten, Konzerte, Festivals,
 Releases), lässt sie von einem **lokalen Sprachmodell** als eigenständigen, SEO-optimierten

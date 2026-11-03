@@ -4,38 +4,160 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Akzentfarbe: ein warmes Violett – Bühnenlicht */
+  --color-brand-50: oklch(0.969 0.016 293.756);
+  --color-brand-100: oklch(0.943 0.029 294.588);
+  --color-brand-200: oklch(0.894 0.057 293.283);
+  --color-brand-300: oklch(0.811 0.111 293.571);
+  --color-brand-400: oklch(0.702 0.183 293.541);
+  --color-brand-500: oklch(0.606 0.25 292.717);
+  --color-brand-600: oklch(0.541 0.281 293.009);
+  --color-brand-700: oklch(0.491 0.27 292.581);
+  --color-brand-800: oklch(0.432 0.232 292.759);
+  --color-brand-900: oklch(0.38 0.189 293.745);
+  --color-brand-950: oklch(0.283 0.141 291.089);
 }
 
 @layer base {
   html {
-    @apply bg-white text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+    @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
     color-scheme: light dark;
+    font-feature-settings: "cv11", "ss01";
   }
   ::selection {
-    @apply bg-zinc-900 text-white dark:bg-white dark:text-zinc-900;
+    @apply bg-brand-600 text-white;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-500;
+  }
+  input[type="checkbox"] {
+    @apply size-4 rounded accent-brand-600;
   }
 }
 
 @layer components {
+  /* ---- Knöpfe */
   .btn {
-    @apply inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-zinc-700 transition-colors
-      hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-40
-      dark:text-zinc-300 dark:hover:bg-zinc-800;
+    @apply inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium whitespace-nowrap
+      text-zinc-700 ring-1 ring-zinc-950/10 bg-white shadow-xs transition
+      hover:bg-zinc-50 hover:text-zinc-900 active:translate-y-px
+      disabled:pointer-events-none disabled:opacity-45
+      dark:bg-zinc-900 dark:text-zinc-200 dark:ring-white/10 dark:hover:bg-zinc-800 dark:hover:text-white;
   }
   .btn-primary {
-    @apply bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200;
+    @apply bg-brand-600 text-white ring-brand-700/60 shadow-sm shadow-brand-600/20
+      hover:bg-brand-500 hover:text-white
+      dark:bg-brand-500 dark:ring-brand-400/40 dark:hover:bg-brand-400;
+  }
+  .btn-ghost {
+    @apply bg-transparent ring-0 shadow-none text-zinc-600 hover:bg-zinc-950/5
+      dark:bg-transparent dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-zinc-100;
   }
   .btn-danger {
-    @apply text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950;
+    @apply text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:text-rose-400 dark:hover:bg-rose-950/60 dark:hover:text-rose-300;
   }
+  .btn-sm {
+    @apply h-7 gap-1.5 rounded-md px-2.5 text-xs;
+  }
+  .btn-icon {
+    @apply size-9 px-0;
+  }
+
+  /* ---- Flächen */
+  .card {
+    @apply rounded-xl bg-white shadow-xs ring-1 ring-zinc-950/5 dark:bg-zinc-900 dark:ring-white/10;
+  }
+  .card-header {
+    @apply flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-zinc-950/5 px-4 py-3 dark:border-white/10;
+  }
+  .card-body {
+    @apply p-4;
+  }
+
+  /* ---- Formulare */
   .field {
-    @apply w-full rounded-md border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm outline-none transition-colors
-      placeholder:text-zinc-400 focus:border-zinc-400 dark:border-zinc-800 dark:focus:border-zinc-600;
+    @apply block w-full rounded-lg bg-white px-3 py-2 text-sm text-zinc-900 shadow-xs ring-1 ring-zinc-950/10 outline-none transition
+      placeholder:text-zinc-400 focus:ring-2 focus:ring-brand-500
+      dark:bg-zinc-950 dark:text-zinc-100 dark:ring-white/10 dark:focus:ring-brand-400;
+  }
+  select.field {
+    @apply pr-8;
   }
   .label {
-    @apply mb-1 flex items-center justify-between text-xs text-zinc-500;
+    @apply mb-1.5 flex items-center justify-between gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400;
   }
   .eyebrow {
-    @apply text-xs font-medium uppercase tracking-wider text-zinc-400;
+    @apply text-[11px] font-semibold tracking-wider text-zinc-500 uppercase dark:text-zinc-400;
+  }
+
+  /* ---- Etiketten */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] leading-4 font-medium whitespace-nowrap
+      bg-zinc-100 text-zinc-600 ring-1 ring-inset ring-zinc-950/5 dark:bg-white/5 dark:text-zinc-400 dark:ring-white/10;
+  }
+  .badge-brand {
+    @apply bg-brand-50 text-brand-700 ring-brand-600/15 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-400/20;
+  }
+  .badge-green {
+    @apply bg-emerald-50 text-emerald-700 ring-emerald-600/15 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/20;
+  }
+  .badge-sky {
+    @apply bg-sky-50 text-sky-700 ring-sky-600/15 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/20;
+  }
+  .badge-amber {
+    @apply bg-amber-50 text-amber-800 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/20;
+  }
+  .badge-rose {
+    @apply bg-rose-50 text-rose-700 ring-rose-600/15 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/20;
+  }
+
+  /* ---- Hinweise */
+  .alert {
+    @apply flex items-start gap-2.5 rounded-lg px-3.5 py-2.5 text-sm ring-1 ring-inset;
+  }
+  .alert-error {
+    @apply bg-rose-50 text-rose-800 ring-rose-600/15 dark:bg-rose-500/10 dark:text-rose-200 dark:ring-rose-400/20;
+  }
+  .alert-warn {
+    @apply bg-amber-50 text-amber-900 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-400/20;
+  }
+  .alert-ok {
+    @apply bg-emerald-50 text-emerald-800 ring-emerald-600/15 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-400/20;
+  }
+  .alert-info {
+    @apply bg-brand-50 text-brand-900 ring-brand-600/15 dark:bg-brand-500/10 dark:text-brand-100 dark:ring-brand-400/20;
+  }
+
+  /* ---- Umschalter (zwei, drei Ansichten) */
+  .segmented {
+    @apply inline-flex rounded-lg bg-zinc-950/5 p-0.5 text-xs dark:bg-white/5;
+  }
+  .segmented > button {
+    @apply rounded-md px-2.5 py-1 font-medium text-zinc-600 transition hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white;
+  }
+  .segmented > button[aria-pressed="true"] {
+    @apply bg-white text-zinc-900 shadow-xs ring-1 ring-zinc-950/5 dark:bg-zinc-700 dark:text-white dark:ring-white/10;
+  }
+
+  /* ---- Reiter innerhalb einer Karte */
+  .tabs {
+    @apply flex gap-1 overflow-x-auto border-b border-zinc-950/5 px-2 dark:border-white/10;
+  }
+  .tabs > button {
+    @apply -mb-px shrink-0 border-b-2 border-transparent px-2.5 pt-2.5 pb-2 text-sm font-medium text-zinc-500 transition
+      hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white;
+  }
+  .tabs > button[aria-selected="true"] {
+    @apply border-brand-600 text-zinc-900 dark:border-brand-400 dark:text-white;
+  }
+
+  /* ---- Leere Zustände und Ladeplatzhalter */
+  .empty {
+    @apply flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-6 py-12 text-center text-sm text-zinc-500
+      dark:border-zinc-700 dark:text-zinc-400;
+  }
+  .skeleton {
+    @apply animate-pulse rounded bg-zinc-200/70 dark:bg-zinc-800;
   }
 }

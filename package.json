@@ -1,9 +1,9 @@
 {
-  "name": "wordpress-mail-sync",
-  "version": "0.2.0",
+  "name": "buehnenpost",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Liest Musik-Pressemitteilungen aus einem IMAP-Postfach, schreibt sie per Claude SEO-gerecht um und veröffentlicht sie in WordPress – mit Vue-Dashboard.",
+  "description": "Bühnenpost: Musik-Pressemitteilungen aus dem Postfach als SEO-Beiträge in WordPress und ein Konzertkalender für Freiburg, Karlsruhe und die Schweiz – mit Dashboard.",
   "scripts": {
     "dev": "bun run dev:server & bun run dev:web",
     "dev:server": "bun run --watch server/index.ts",

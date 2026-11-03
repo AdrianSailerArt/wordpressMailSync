@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { api, formatDate, type OriginalMail } from "../api";
 import { compareDates, foreignLinks, htmlToPlain } from "../facts";
+import Icon from "./Icon.vue";
 
 /** Original-Mail wie im Mailprogramm, daneben eine Prüfliste gegen den Beitrag. */
 const props = defineProps<{ uid: number; original: OriginalMail | null; article?: { title: string; content_html: string } }>();
@@ -61,11 +62,11 @@ const problems = computed(() => (dates.value?.onlyArticle.length ?? 0) + (dates.
 </script>
 
 <template>
-  <p v-if="!original" class="text-sm text-zinc-500">Original wird geladen …</p>
+  <div v-if="!original" class="space-y-3"><div v-for="n in 5" :key="n" class="skeleton h-3" /></div>
   <div v-else class="grid gap-4" :class="article && 'xl:grid-cols-[minmax(0,1fr)_18rem]'">
-    <div class="min-w-0 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+    <div class="min-w-0 overflow-hidden rounded-xl ring-1 ring-zinc-950/5 dark:ring-white/10">
       <!-- Kopfzeilen -->
-      <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs dark:border-zinc-800 dark:bg-zinc-900/50">
+      <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 border-b border-zinc-950/5 bg-zinc-950/[0.02] px-4 py-3 text-xs dark:border-white/10 dark:bg-white/[0.02]">
         <dt class="text-zinc-500">Betreff</dt>
         <dd class="font-medium text-zinc-900 dark:text-zinc-100">{{ original.subject }}</dd>
         <dt class="text-zinc-500">Von</dt>
@@ -79,21 +80,20 @@ const problems = computed(() => (dates.value?.onlyArticle.length ?? 0) + (dates.
         <template v-if="original.attachments.length">
           <dt class="text-zinc-500">Anhänge</dt>
           <dd class="flex flex-wrap gap-1.5">
-            <span v-for="a in original.attachments" :key="a.filename" class="rounded bg-zinc-200/70 px-1.5 py-0.5 dark:bg-zinc-800">
-              {{ a.filename }} <span class="text-zinc-500">· {{ size(a.size) }}</span>
+            <span v-for="a in original.attachments" :key="a.filename" class="badge">
+              {{ a.filename }} <span class="opacity-60">· {{ size(a.size) }}</span>
             </span>
           </dd>
         </template>
       </dl>
 
       <!-- Darstellung -->
-      <div class="flex flex-wrap items-center gap-3 border-b border-zinc-200 px-4 py-2 text-xs dark:border-zinc-800">
-        <div v-if="original.hasHtml" class="flex rounded-md bg-zinc-100 p-0.5 dark:bg-zinc-900">
+      <div class="flex flex-wrap items-center gap-3 border-b border-zinc-950/5 px-4 py-2 text-xs dark:border-white/10">
+        <div v-if="original.hasHtml" class="segmented">
           <button
             v-for="[id, label] in ([['html', 'Wie im Mailprogramm'], ['text', 'Nur Text']] as const)"
             :key="id"
-            class="rounded px-2 py-0.5 transition-colors"
-            :class="mode === id ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'"
+            :aria-pressed="mode === id"
             @click="mode = id"
           >
             {{ label }}
@@ -101,15 +101,15 @@ const problems = computed(() => (dates.value?.onlyArticle.length ?? 0) + (dates.
         </div>
         <span v-else class="text-zinc-500">Reine Text-Mail</span>
         <label v-if="showHtml" class="flex items-center gap-1.5 text-zinc-500" title="Bilder vom Server des Absenders laden – der Absender sieht dann, dass die Mail geöffnet wurde">
-          <input v-model="remoteImages" type="checkbox" class="accent-zinc-900 dark:accent-white" />
+          <input v-model="remoteImages" type="checkbox" />
           Externe Bilder
         </label>
-        <a v-if="showHtml" :href="frameUrl" target="_blank" rel="noopener" class="ml-auto text-zinc-500 underline-offset-2 hover:underline">In neuem Tab</a>
+        <a v-if="showHtml" :href="frameUrl" target="_blank" rel="noopener" class="ml-auto inline-flex items-center gap-1 font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-white">In neuem Tab <Icon name="external" :size="12" /></a>
       </div>
 
       <!-- sandbox ohne allow-scripts/allow-same-origin: die Mail kann nichts ausführen und nicht aufs Dashboard zugreifen -->
       <p v-if="showHtml && frameError" class="px-4 py-3 text-sm text-rose-600 dark:text-rose-400">{{ frameError }}</p>
-      <div v-else-if="showHtml && !frameHtml" class="h-[70vh] animate-pulse bg-zinc-50 dark:bg-zinc-900" />
+      <div v-else-if="showHtml && !frameHtml" class="h-[70vh] animate-pulse bg-zinc-100 dark:bg-zinc-800" />
       <iframe
         v-else-if="showHtml"
         :srcdoc="frameHtml"
@@ -123,7 +123,8 @@ const problems = computed(() => (dates.value?.onlyArticle.length ?? 0) + (dates.
 
     <!-- Prüfliste -->
     <aside v-if="article && dates" class="space-y-5 text-xs">
-      <p class="rounded-lg px-3 py-2" :class="problems ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300' : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'">
+      <p class="alert !text-xs font-medium" :class="problems ? 'alert-warn' : 'alert-ok'">
+        <Icon :name="problems ? 'alert' : 'check'" :size="14" class="mt-px" />
         {{ problems ? `${problems} Stelle${problems === 1 ? "" : "n"} bitte prüfen` : "Termine und Links passen zur Mail" }}
       </p>
 

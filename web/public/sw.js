@@ -3,7 +3,7 @@
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};
   event.waitUntil(
-    self.registration.showNotification(data.title || "Mail Sync", {
+    self.registration.showNotification(data.title || "Bühnenpost", {
       body: data.body || "",
       tag: data.tag,
       icon: "/icon.svg",

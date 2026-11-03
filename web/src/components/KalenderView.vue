@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { api, formatDate, type Abgleich, type EventState, type KalenderState, type KonzertEvent } from "../api";
+import Icon from "./Icon.vue";
+import PageHeader from "./PageHeader.vue";
 
 const state = ref<KalenderState | null>(null);
 const error = ref("");
@@ -33,11 +35,11 @@ const counts = computed(() => {
 });
 
 const STATES: Record<EventState, [string, string]> = {
-  neu: ["neu", "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"],
-  geändert: ["geändert", "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300"],
-  unverändert: ["schon drin", "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"],
-  dublette: ["Dublette", "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"],
-  gesperrt: ["gesperrt", "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"],
+  neu: ["neu", "badge-green"],
+  geändert: ["geändert", "badge-sky"],
+  unverändert: ["schon drin", ""],
+  dublette: ["Dublette", "badge-amber"],
+  gesperrt: ["gesperrt", ""],
 };
 const FIELD_LABELS: Record<string, string> = {
   date: "Datum", time: "Uhrzeit", title: "Titel", venue: "Location", city: "Ort", country: "Land",
@@ -75,6 +77,8 @@ const days = computed(() => {
   }
   return groups;
 });
+
+const TYPE_LABEL = { seite: "Sprachmodell", vaddi: "fester Parser", z7: "fester Parser", ticketmaster: "API" } as const;
 
 const dayLabel = (date: string) =>
   new Date(`${date}T12:00:00`).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -155,178 +159,200 @@ onUnmounted(() => clearTimeout(timer));
 </script>
 
 <template>
-  <div v-if="!state" class="text-sm text-zinc-500">
-    <p v-if="error" class="rounded-md bg-rose-50 px-3 py-2 text-rose-700 dark:bg-rose-950 dark:text-rose-300">{{ error }}</p>
-    <p v-else>Wird geladen …</p>
+  <div v-if="!state" class="space-y-4">
+    <div v-if="error" class="alert alert-error"><Icon name="alert" class="mt-0.5" />{{ error }}</div>
+    <template v-else><div class="skeleton h-8 w-64" /><div class="skeleton h-32 w-full rounded-xl" /></template>
   </div>
 
   <div v-else>
-    <p v-if="error" class="mb-4 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:bg-rose-950 dark:text-rose-300">{{ error }}</p>
-
-    <div class="mb-6 flex flex-wrap items-start gap-4">
-      <div class="mr-auto min-w-0 text-sm">
-        <h2 class="text-base font-semibold">Konzertkalender</h2>
-        <p v-if="last" class="mt-0.5 text-xs text-zinc-500">
+    <PageHeader title="Konzertkalender">
+      <template #description>
+        <template v-if="last">
           {{ last.events.length }} Termine · abgerufen {{ formatDate(last.at) }} ·
-          <span v-if="!last.dryRun">übertragen {{ formatDate(last.transferredAt ?? last.at) }}</span>
-          <span v-else-if="last.transferredUids?.length || last.transferredSources?.length" class="text-amber-600 dark:text-amber-400">
+          <span v-if="!last.dryRun" class="text-emerald-700 dark:text-emerald-400">übertragen {{ formatDate(last.transferredAt ?? last.at) }}</span>
+          <span v-else-if="last.transferredUids?.length || last.transferredSources?.length" class="text-amber-700 dark:text-amber-400">
             teilweise übertragen<template v-if="last.transferredSources?.length">: {{ last.transferredSources.map(sourceName).join(", ") }}</template><template v-if="last.transferredUids?.length"> · {{ last.transferredUids.length }} einzelne Termine</template>
           </span>
-          <span v-else class="text-amber-600 dark:text-amber-400">Probelauf, noch nicht übertragen</span>
-        </p>
-        <p v-else class="mt-0.5 text-xs text-zinc-500">Noch nicht abgerufen.</p>
-        <p class="mt-0.5 text-xs text-zinc-500">
-          <template v-if="state.config.auto">Automatisch: nächster Abruf {{ formatDate(state.nextRun) }}</template>
-          <template v-else>Nur von Hand – täglich mit <code class="font-mono">KALENDER_AUTO=true</code></template>
-          · neue Termine in WordPress: {{ state.config.postStatus === "draft" ? "als Entwurf" : "sofort sichtbar" }}
-        </p>
-      </div>
-      <div class="flex flex-wrap gap-1">
-        <button class="btn" :disabled="state.busy || starting" title="Alle Quellen lesen, nichts an WordPress schicken" @click="dryRun()">Probelauf</button>
+          <span v-else class="text-amber-700 dark:text-amber-400">Probelauf, noch nicht übertragen</span>
+        </template>
+        <template v-else>Termine von Clubs, Veranstaltern und Ticketmaster – noch nicht abgerufen.</template>
+      </template>
+      <template #actions>
+        <button class="btn" :disabled="state.busy || starting" title="Alle Quellen lesen, nichts an WordPress schicken" @click="dryRun()">
+          <Icon name="download" />Probelauf
+        </button>
         <button
           v-if="last"
           class="btn"
           :disabled="state.busy || starting || !abgleich"
           title="Alle abgerufenen Termine an WordPress schicken (ohne Dubletten), ohne die Seiten erneut zu lesen. Termine, die eine Quelle nicht mehr liefert, werden entfernt."
           @click="transferAll"
-        >Alle übertragen</button>
+        ><Icon name="upload" />Alle übertragen</button>
         <button class="btn btn-primary" :disabled="state.busy || starting" @click="runAndTransfer">
-          {{ state.busy ? "Läuft …" : "Abrufen & übertragen" }}
+          <Icon name="refresh" :class="state.busy && 'animate-spin'" />{{ state.busy ? "Läuft …" : "Abrufen & übertragen" }}
         </button>
+      </template>
+    </PageHeader>
+
+    <div class="mb-6 space-y-3">
+      <div v-if="error" class="alert alert-error"><Icon name="alert" class="mt-0.5" /><span class="break-words">{{ error }}</span></div>
+      <div class="flex flex-wrap gap-2 text-xs">
+        <span class="badge"><Icon name="clock" :size="12" />
+          <template v-if="state.config.auto">automatisch · nächster Abruf {{ formatDate(state.nextRun) }}</template>
+          <template v-else>nur von Hand · täglich mit KALENDER_AUTO=true</template>
+        </span>
+        <span class="badge"><Icon name="globe" :size="12" />neue Termine {{ state.config.postStatus === "draft" ? "als Entwurf" : "sofort sichtbar" }}</span>
+      </div>
+      <div v-if="!state.config.ticketmaster" class="alert alert-warn text-xs">
+        <Icon name="alert" :size="14" class="mt-px" />
+        <span>
+          Ticketmaster ist aus: kostenlosen Schlüssel auf
+          <a href="https://developer.ticketmaster.com" target="_blank" class="font-medium underline underline-offset-2">developer.ticketmaster.com</a>
+          holen und als <code class="font-mono">TICKETMASTER_API_KEY</code> in die <code class="font-mono">.env</code> eintragen.
+        </span>
       </div>
     </div>
 
-    <p v-if="!state.config.ticketmaster" class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
-      Ticketmaster ist aus: kostenlosen Schlüssel auf
-      <a href="https://developer.ticketmaster.com" target="_blank" class="underline underline-offset-2">developer.ticketmaster.com</a>
-      holen und als <code class="font-mono">TICKETMASTER_API_KEY</code> in die <code class="font-mono">.env</code> eintragen.
-    </p>
-
-    <section v-if="progress" class="mb-6 rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
-      <div class="flex items-center gap-2">
-        <span class="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-        <span class="font-medium">
+    <!-- Fortschritt -->
+    <section v-if="progress" class="card mb-6 overflow-hidden">
+      <div class="card-header">
+        <span class="relative flex size-2.5">
+          <span class="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span class="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
+        </span>
+        <span class="min-w-0 flex-1 truncate text-sm font-medium">
           <template v-if="progress.cancelling">Wird abgebrochen …</template>
           <template v-else>{{ progress.task === "abrufen" ? "Liest" : "Überträgt" }} {{ progress.current || "…" }}</template>
         </span>
-        <span class="ml-auto text-xs tabular-nums text-zinc-500">{{ progress.done }} / {{ progress.total }} · {{ elapsed }}</span>
+        <span class="text-xs tabular-nums text-zinc-500">{{ progress.done }} / {{ progress.total }} · {{ elapsed }}</span>
         <button
-          class="btn btn-danger -my-1 -mr-2 h-7 text-xs"
+          class="btn btn-sm btn-danger"
           :disabled="progress.cancelling || starting"
           title="Stoppt auch die laufende Anfrage an das Sprachmodell. Fertige Quellen bleiben, die übrigen behalten ihr voriges Ergebnis; übertragen wird nichts mehr."
           @click="cancel"
-        >Abbrechen</button>
+        ><Icon name="stop" :size="12" />Abbrechen</button>
       </div>
-      <div class="mt-2 h-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
-        <div class="h-full bg-zinc-900 transition-all dark:bg-white" :style="{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }" />
+      <div class="h-1 bg-zinc-950/5 dark:bg-white/5">
+        <div class="h-full bg-brand-500 transition-all duration-500" :style="{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%` }" />
       </div>
-      <p v-if="progress.task === 'abrufen' && progress.reading" class="mt-2 text-xs text-zinc-500">
-        Das Sprachmodell liest {{ progress.reading }} – neue oder geänderte Abschnitte dauern je etwa eine Minute, unveränderte kommen aus dem Zwischenspeicher.
-      </p>
-      <ul v-if="progress.lines.length" class="mt-2 space-y-0.5 font-mono text-xs text-zinc-500">
-        <li v-for="(l, i) in progress.lines" :key="i">{{ l }}</li>
-      </ul>
+      <div class="card-body space-y-2">
+        <p v-if="progress.task === 'abrufen' && progress.reading" class="flex items-center gap-1.5 text-xs text-zinc-500">
+          <Icon name="cpu" :size="13" />Das Sprachmodell liest {{ progress.reading }} – neue oder geänderte Abschnitte dauern je etwa eine Minute, unveränderte kommen aus dem Zwischenspeicher.
+        </p>
+        <ul v-if="progress.lines.length" class="space-y-0.5 font-mono text-xs text-zinc-500">
+          <li v-for="(l, i) in progress.lines" :key="i">{{ l }}</li>
+        </ul>
+      </div>
     </section>
 
     <!-- Abgleich mit WordPress -->
-    <section v-if="last && !progress" class="mb-6 rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h3 class="eyebrow">Abgleich mit WordPress</h3>
-        <template v-if="abgleich">
-          <span class="text-xs text-zinc-500">{{ abgleich.total }} Termine dort · geprüft {{ formatDate(abgleich.at) }}</span>
-        </template>
-        <button class="btn -my-1 ml-auto h-7 text-xs" :disabled="checking" @click="loadAbgleich">{{ checking ? "Prüft …" : "Neu prüfen" }}</button>
+    <section v-if="last && !progress" class="card mb-6">
+      <div class="card-header">
+        <Icon name="layers" class="text-zinc-400" />
+        <h2 class="text-sm font-semibold">Abgleich mit WordPress</h2>
+        <span v-if="abgleich" class="text-xs text-zinc-500">{{ abgleich.total }} Termine dort · geprüft {{ formatDate(abgleich.at) }}</span>
+        <button class="btn btn-ghost btn-sm ml-auto" :disabled="checking" @click="loadAbgleich">
+          <Icon name="refresh" :size="13" :class="checking && 'animate-spin'" />{{ checking ? "Prüft …" : "Neu prüfen" }}
+        </button>
       </div>
-      <p v-if="abgleichError" class="mt-2 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:bg-rose-950 dark:text-rose-300">{{ abgleichError }}</p>
-      <template v-else-if="abgleich">
-        <div class="mt-3 flex flex-wrap gap-2">
-          <button
-            v-for="s in (['neu', 'geändert', 'unverändert', 'dublette', 'gesperrt'] as const)"
-            :key="s"
-            v-show="counts[s]"
-            class="rounded px-2 py-0.5 text-xs transition-shadow"
-            :class="[STATES[s][1], stateFilter === s && 'ring-1 ring-current']"
-            :title="s === 'dublette' ? 'Derselbe Abend steht schon aus einer anderen Quelle oder von Hand in WordPress – wird nicht nochmal angelegt' : 'Nur diese zeigen'"
-            @click="stateFilter = stateFilter === s ? '' : s"
-          >{{ counts[s] }} {{ STATES[s][0] }}</button>
-          <button v-if="abgleich.removals.length" class="rounded bg-rose-50 px-2 py-0.5 text-xs text-rose-700 dark:bg-rose-950 dark:text-rose-300" @click="showRemovals = !showRemovals">
-            {{ abgleich.removals.length }} würden entfernt
-          </button>
-          <button v-if="abgleich.wpDuplicates.length" class="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-300" @click="showWpDuplicates = !showWpDuplicates">
-            {{ abgleich.wpDuplicates.length }}× doppelt in WordPress
-          </button>
-          <span v-if="!abgleich.removals.length && !abgleich.wpDuplicates.length && !counts.dublette" class="self-center text-xs text-zinc-500">keine Dubletten</span>
-        </div>
+      <div class="card-body">
+        <div v-if="abgleichError" class="alert alert-error text-xs"><Icon name="alert" :size="14" class="mt-px" />{{ abgleichError }}</div>
+        <template v-else-if="abgleich">
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-for="s in (['neu', 'geändert', 'unverändert', 'dublette', 'gesperrt'] as const)"
+              v-show="counts[s]"
+              :key="s"
+              class="badge !px-2 !py-1 !text-xs transition"
+              :class="[STATES[s][1], stateFilter === s ? '!ring-2 !ring-current' : 'hover:opacity-80']"
+              :title="s === 'dublette' ? 'Derselbe Abend steht schon aus einer anderen Quelle oder von Hand in WordPress – wird nicht nochmal angelegt' : 'Nur diese zeigen'"
+              @click="stateFilter = stateFilter === s ? '' : s"
+            ><span class="font-semibold tabular-nums">{{ counts[s] }}</span> {{ STATES[s][0] }}</button>
+            <button v-if="abgleich.removals.length" class="badge badge-rose !px-2 !py-1 !text-xs" @click="showRemovals = !showRemovals">
+              <span class="font-semibold tabular-nums">{{ abgleich.removals.length }}</span> würden entfernt
+            </button>
+            <button v-if="abgleich.wpDuplicates.length" class="badge badge-amber !px-2 !py-1 !text-xs" @click="showWpDuplicates = !showWpDuplicates">
+              <span class="font-semibold tabular-nums">{{ abgleich.wpDuplicates.length }}×</span> doppelt in WordPress
+            </button>
+            <span v-if="!abgleich.removals.length && !abgleich.wpDuplicates.length && !counts.dublette" class="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+              <Icon name="check" :size="13" />keine Dubletten
+            </span>
+            <button v-if="stateFilter" class="btn btn-ghost btn-sm" @click="stateFilter = ''"><Icon name="x" :size="12" />Filter aufheben</button>
+          </div>
 
-        <div v-if="showRemovals && abgleich.removals.length" class="mt-3 text-xs">
-          <p class="text-zinc-500">Diese Termine liefert ihre Quelle nicht mehr – „Alle übertragen“ entfernt sie (einzelnes Übertragen nicht). Behalten: in WordPress „Nicht automatisch überschreiben“ anhaken.</p>
-          <ul class="mt-1 space-y-0.5">
-            <li v-for="r in abgleich.removals" :key="r.id">
-              <span class="tabular-nums text-zinc-500">{{ r.date }}</span> · <a :href="r.edit_link" target="_blank" class="underline-offset-2 hover:underline">{{ r.title }}</a>
-              <span class="text-zinc-400"> · {{ sourceName(r.source) }}</span>
-            </li>
-          </ul>
-        </div>
+          <div v-if="showRemovals && abgleich.removals.length" class="mt-4 rounded-lg bg-rose-50/60 p-3 text-xs ring-1 ring-rose-600/10 dark:bg-rose-500/5 dark:ring-rose-400/15">
+            <p class="text-zinc-600 dark:text-zinc-400">Diese Termine liefert ihre Quelle nicht mehr – „Alle übertragen“ entfernt sie (einzelnes Übertragen nicht). Behalten: in WordPress „Nicht automatisch überschreiben“ anhaken.</p>
+            <ul class="mt-2 space-y-1">
+              <li v-for="r in abgleich.removals" :key="r.id">
+                <span class="tabular-nums text-zinc-500">{{ r.date }}</span> · <a :href="r.edit_link" target="_blank" class="font-medium underline-offset-2 hover:underline">{{ r.title }}</a>
+                <span class="text-zinc-400"> · {{ sourceName(r.source) }}</span>
+              </li>
+            </ul>
+          </div>
 
-        <div v-if="showWpDuplicates && abgleich.wpDuplicates.length" class="mt-3 text-xs">
-          <p class="text-zinc-500">Derselbe Abend steht in WordPress mehrfach – einen davon dort löschen oder auf Entwurf setzen.</p>
-          <ul class="mt-1 space-y-1">
-            <li v-for="[a, b] in abgleich.wpDuplicates" :key="a.id + '-' + b.id">
-              <span class="tabular-nums text-zinc-500">{{ a.date }}</span> ·
-              <a :href="a.edit_link" target="_blank" class="underline-offset-2 hover:underline">{{ a.title }}</a> <span class="text-zinc-400">({{ sourceName(a.source) }}, {{ a.post_status }})</span>
-              und
-              <a :href="b.edit_link" target="_blank" class="underline-offset-2 hover:underline">{{ b.title }}</a> <span class="text-zinc-400">({{ sourceName(b.source) }}, {{ b.post_status }})</span>
-            </li>
-          </ul>
-        </div>
-      </template>
-      <p v-else class="mt-2 text-xs text-zinc-500">Prüft, was schon in WordPress steht …</p>
+          <div v-if="showWpDuplicates && abgleich.wpDuplicates.length" class="mt-4 rounded-lg bg-amber-50/60 p-3 text-xs ring-1 ring-amber-600/10 dark:bg-amber-500/5 dark:ring-amber-400/15">
+            <p class="text-zinc-600 dark:text-zinc-400">Derselbe Abend steht in WordPress mehrfach – einen davon dort löschen oder auf Entwurf setzen.</p>
+            <ul class="mt-2 space-y-1">
+              <li v-for="[a, b] in abgleich.wpDuplicates" :key="a.id + '-' + b.id">
+                <span class="tabular-nums text-zinc-500">{{ a.date }}</span> ·
+                <a :href="a.edit_link" target="_blank" class="font-medium underline-offset-2 hover:underline">{{ a.title }}</a> <span class="text-zinc-400">({{ sourceName(a.source) }}, {{ a.post_status }})</span>
+                und
+                <a :href="b.edit_link" target="_blank" class="font-medium underline-offset-2 hover:underline">{{ b.title }}</a> <span class="text-zinc-400">({{ sourceName(b.source) }}, {{ b.post_status }})</span>
+              </li>
+            </ul>
+          </div>
+        </template>
+        <div v-else class="flex gap-2"><div v-for="n in 3" :key="n" class="skeleton h-6 w-24" /></div>
+      </div>
     </section>
 
-    <div class="grid gap-8 lg:grid-cols-[17rem_1fr]">
+    <div class="grid items-start gap-6 xl:grid-cols-[20rem_minmax(0,1fr)]">
       <!-- Quellen -->
-      <aside class="min-w-0">
-        <div class="mb-2 flex items-center">
-          <h3 class="eyebrow">Quellen</h3>
-          <button v-if="source" class="eyebrow ml-auto hover:!text-zinc-600 dark:hover:!text-zinc-300" @click="source = ''">alle zeigen</button>
+      <aside class="card min-w-0 overflow-hidden xl:sticky xl:top-6">
+        <div class="card-header">
+          <h2 class="text-sm font-semibold">Quellen</h2>
+          <span class="text-xs text-zinc-500">{{ state.sources.length }}</span>
+          <button v-if="source" class="btn btn-ghost btn-sm ml-auto" @click="source = ''"><Icon name="x" :size="12" />alle zeigen</button>
         </div>
-        <ul class="-mx-2">
+        <ul class="max-h-96 divide-y divide-zinc-950/5 overflow-y-auto xl:max-h-[calc(100dvh-12rem)] dark:divide-white/5">
           <li v-for="s in state.sources" :key="s.id">
-            <div
-              class="group rounded-md px-2 py-2 transition-colors"
-              :class="source === s.id ? 'bg-zinc-100 dark:bg-zinc-900' : 'hover:bg-zinc-50 dark:hover:bg-zinc-900/50'"
-            >
-              <div class="flex items-baseline gap-2">
-                <button class="truncate text-left text-sm font-medium" @click="source = source === s.id ? '' : s.id">{{ s.name }}</button>
-                <a :href="s.url" target="_blank" class="shrink-0 text-xs text-zinc-400 hover:text-zinc-600" title="Seite öffnen">↗</a>
+            <div class="relative px-4 py-3 transition-colors" :class="source === s.id ? 'bg-brand-50/70 dark:bg-brand-500/10' : ''">
+              <span v-if="source === s.id" class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-brand-600 dark:bg-brand-400" />
+              <div class="flex items-center gap-2">
+                <button class="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-brand-700 dark:hover:text-brand-300" title="Nur Termine dieser Quelle zeigen" @click="source = source === s.id ? '' : s.id">
+                  {{ s.name }}
+                </button>
+                <a :href="s.url" target="_blank" class="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title="Seite öffnen"><Icon name="external" :size="13" /></a>
               </div>
-              <div class="mt-1 flex gap-3 text-xs">
+              <template v-for="r in [last?.sources.find((x) => x.id === s.id)]" :key="s.id + 'r'">
+                <p v-if="r?.error" class="mt-1 line-clamp-2 break-words text-xs text-rose-600 dark:text-rose-400" :title="r.error">{{ r.error }}</p>
+                <p v-else-if="r?.skipped" class="mt-1 text-xs text-amber-700 dark:text-amber-400">{{ r.skipped }}</p>
+                <template v-else-if="r">
+                  <p class="mt-1 flex flex-wrap gap-x-2 text-xs tabular-nums text-zinc-500">
+                    <span><span class="font-medium text-zinc-700 dark:text-zinc-300">{{ r.found }}</span> Termine</span>
+                    <span v-if="r.sent !== r.found">{{ r.found - r.sent }} doppelt</span>
+                    <span v-if="r.wp" class="text-emerald-700 dark:text-emerald-400">{{ r.wp.created }} neu · {{ r.wp.updated }} aktualisiert<template v-if="r.wp.deleted"> · {{ r.wp.deleted }} entfernt</template></span>
+                  </p>
+                  <p v-if="r.sendError" class="mt-1 break-words text-xs text-rose-600 dark:text-rose-400">Übertragen: {{ r.sendError }}</p>
+                </template>
+                <p v-else class="mt-1 text-xs text-zinc-400">noch nicht abgerufen</p>
+              </template>
+              <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                <span class="badge mr-auto">{{ TYPE_LABEL[s.typ] }}</span>
                 <button
-                  class="text-zinc-500 underline-offset-2 hover:text-zinc-800 hover:underline disabled:opacity-40 dark:hover:text-zinc-200"
+                  class="btn btn-sm"
                   :disabled="state.busy || starting"
                   title="Nur diese Location neu abrufen – nichts an WordPress schicken, die anderen Quellen bleiben wie sie sind"
                   @click="dryRun([s.id])"
-                >abrufen</button>
+                ><Icon name="download" :size="12" />abrufen</button>
                 <button
                   v-if="canTransfer(s.id)"
-                  class="text-zinc-500 underline-offset-2 hover:text-zinc-800 hover:underline disabled:opacity-40 dark:hover:text-zinc-200"
+                  class="btn btn-sm"
                   :disabled="state.busy || starting || !abgleich"
                   title="Nur die Termine dieser Location an WordPress schicken (ohne Dubletten). Ihre Termine, die sie nicht mehr liefert, werden entfernt – andere Quellen bleiben unberührt."
                   @click="transferSource(s.id)"
-                >übertragen</button>
+                ><Icon name="upload" :size="12" />übertragen</button>
               </div>
-              <template v-for="r in [last?.sources.find((x) => x.id === s.id)]" :key="s.id + 'r'">
-                <p v-if="r?.error" class="mt-0.5 break-words text-xs text-rose-600 dark:text-rose-400">{{ r.error }}</p>
-                <p v-else-if="r?.skipped" class="mt-0.5 text-xs text-amber-600 dark:text-amber-400">{{ r.skipped }}</p>
-                <template v-else-if="r">
-                  <p class="mt-0.5 text-xs tabular-nums text-zinc-500">
-                    {{ r.found }} gefunden<template v-if="r.sent !== r.found"> · {{ r.found - r.sent }} doppelt</template>
-                    <template v-if="r.wp"> · {{ r.wp.created }} neu, {{ r.wp.updated }} aktualisiert<template v-if="r.wp.deleted">, {{ r.wp.deleted }} entfernt</template></template>
-                  </p>
-                  <p v-if="r.sendError" class="mt-0.5 break-words text-xs text-rose-600 dark:text-rose-400">Übertragen: {{ r.sendError }}</p>
-                </template>
-                <p v-else class="mt-0.5 text-xs text-zinc-400">{{ s.typ === "seite" ? "Sprachmodell" : s.typ === "ticketmaster" ? "API" : "fester Parser" }} · noch nicht abgerufen</p>
-              </template>
             </div>
           </li>
         </ul>
@@ -334,8 +360,11 @@ onUnmounted(() => clearTimeout(timer));
 
       <!-- Termine -->
       <section class="min-w-0">
-        <div class="mb-4 flex flex-wrap gap-2">
-          <input v-model="search" class="field max-w-xs" placeholder="Künstler, Location …" />
+        <div class="card mb-4 flex flex-wrap items-center gap-2 p-2">
+          <div class="relative min-w-48 flex-1">
+            <Icon name="search" :size="15" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-zinc-400" />
+            <input v-model="search" class="field !pl-9 !shadow-none !ring-0" placeholder="Künstler, Location, Infos …" />
+          </div>
           <select v-model="city" class="field w-auto">
             <option value="">Alle Orte</option>
             <option v-for="c in cities" :key="c">{{ c }}</option>
@@ -344,69 +373,82 @@ onUnmounted(() => clearTimeout(timer));
             <option value="">Alle Länder</option>
             <option v-for="c in countries" :key="c">{{ c }}</option>
           </select>
-          <span class="self-center text-xs tabular-nums text-zinc-500">{{ visible.length }} Termine</span>
+          <span class="px-2 text-xs tabular-nums text-zinc-500">{{ visible.length }} Termine</span>
         </div>
 
         <!-- Auswahl -->
-        <div v-if="abgleich && last" class="sticky top-0 z-10 -mx-2 mb-3 flex flex-wrap items-center gap-2 rounded-md bg-white/90 px-2 py-1.5 text-xs backdrop-blur dark:bg-zinc-950/90">
-          <label class="flex items-center gap-2" :class="!visibleSelectable.length && 'opacity-40'">
+        <div v-if="abgleich && last" class="sticky top-16 z-10 mb-4 flex flex-wrap items-center gap-3 rounded-xl px-3 py-2 text-xs transition lg:top-2"
+          :class="selected.length ? 'bg-brand-600 text-white shadow-lg shadow-brand-600/20 dark:bg-brand-500' : 'bg-white/90 text-zinc-600 ring-1 ring-zinc-950/5 backdrop-blur dark:bg-zinc-900/90 dark:text-zinc-400 dark:ring-white/10'">
+          <label class="flex items-center gap-2" :class="!visibleSelectable.length && 'opacity-50'">
             <input type="checkbox" :checked="allVisibleSelected" :disabled="!visibleSelectable.length" @change="toggleVisible" />
-            neue und geänderte in der Ansicht auswählen ({{ visibleSelectable.length }})
+            Neue und geänderte in der Ansicht auswählen ({{ visibleSelectable.length }})
           </label>
           <template v-if="selected.length">
-            <span class="ml-auto text-zinc-500">{{ selected.length }} ausgewählt</span>
-            <button class="btn h-7 text-xs" @click="selected = []">Aufheben</button>
-            <button class="btn btn-primary h-7 text-xs" :disabled="state.busy || starting" @click="transferSelected">Ausgewählte übertragen</button>
+            <span class="ml-auto font-medium">{{ selected.length }} ausgewählt</span>
+            <button class="rounded-md px-2 py-1 font-medium hover:bg-white/15" @click="selected = []">Aufheben</button>
+            <button class="inline-flex items-center gap-1.5 rounded-md bg-white px-2.5 py-1 font-semibold text-brand-700 shadow-sm hover:bg-brand-50" :disabled="state.busy || starting" @click="transferSelected">
+              <Icon name="upload" :size="12" />Ausgewählte übertragen
+            </button>
           </template>
         </div>
 
-        <p v-if="!last" class="py-6 text-sm text-zinc-500">Noch keine Termine – „Probelauf“ liest alle Quellen, ohne etwas zu übertragen.</p>
-        <p v-else-if="!days.length" class="py-6 text-sm text-zinc-500">Keine Termine für diese Auswahl.</p>
+        <div v-if="!last" class="empty">
+          <Icon name="calendar" :size="32" class="text-zinc-300 dark:text-zinc-600" />
+          <p class="font-medium text-zinc-700 dark:text-zinc-300">Noch keine Termine</p>
+          <p>„Probelauf“ liest alle Quellen, ohne etwas zu übertragen.</p>
+        </div>
+        <div v-else-if="!days.length" class="empty"><p>Keine Termine für diese Auswahl.</p></div>
 
-        <div v-for="d in days" :key="d.date" class="mb-5">
-          <h4 class="eyebrow mb-1">{{ dayLabel(d.date) }}</h4>
-          <ul class="divide-y divide-zinc-100 dark:divide-zinc-900">
-            <li v-for="e in d.events" :key="e.uid" class="grid grid-cols-[1.25rem_3.5rem_1fr] gap-3 py-2.5 text-sm">
-              <input
-                v-model="selected"
-                type="checkbox"
-                class="mt-1"
-                :value="e.uid"
-                :disabled="!abgleich || !selectable(e.uid)"
-                :title="selectable(e.uid) ? 'Zum Übertragen auswählen' : 'Steht schon in WordPress'"
-              />
-              <span class="tabular-nums text-zinc-500">{{ e.time || "–" }}</span>
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <a v-if="e.url" :href="e.url" target="_blank" class="font-medium underline-offset-2 hover:underline">{{ e.artists.join(", ") || e.title }}</a>
-                  <span v-else class="font-medium">{{ e.artists.join(", ") || e.title }}</span>
-                  <span v-if="e.status" class="rounded bg-amber-50 px-1.5 text-[11px] leading-4 text-amber-700 dark:bg-amber-950 dark:text-amber-300">{{ e.status }}</span>
-                  <span class="ml-auto flex gap-1">
-                    <template v-for="c in [checkOf(e.uid)]" :key="e.uid + 'c'">
-                      <a
-                        v-if="c"
-                        :href="c.existing?.edit_link"
-                        target="_blank"
-                        class="rounded px-1.5 text-[11px] leading-4"
-                        :class="[STATES[c.state][1], !c.existing && 'pointer-events-none']"
-                        :title="c.changes?.length ? `Ändert: ${c.changes.map((f) => FIELD_LABELS[f] ?? f).join(', ')}` : c.existing ? 'In WordPress öffnen' : ''"
-                      >{{ STATES[c.state][0] }}</a>
-                    </template>
-                    <span class="rounded bg-zinc-100 px-1.5 text-[11px] leading-4 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">{{ sourceName(e.source) }}</span>
-                  </span>
+        <div class="space-y-4">
+          <section v-for="d in days" :key="d.date" class="card overflow-hidden">
+            <h3 class="flex items-baseline gap-2 border-b border-zinc-950/5 bg-zinc-950/[0.02] px-4 py-2 dark:border-white/10 dark:bg-white/[0.02]">
+              <span class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{{ dayLabel(d.date) }}</span>
+              <span class="text-xs text-zinc-500">{{ d.events.length }} {{ d.events.length === 1 ? "Termin" : "Termine" }}</span>
+            </h3>
+            <ul class="divide-y divide-zinc-950/5 dark:divide-white/5">
+              <li v-for="e in d.events" :key="e.uid" class="flex gap-3 px-4 py-3 transition-colors" :class="selected.includes(e.uid) && 'bg-brand-50/50 dark:bg-brand-500/5'">
+                <input
+                  v-model="selected"
+                  type="checkbox"
+                  class="mt-1"
+                  :value="e.uid"
+                  :disabled="!abgleich || !selectable(e.uid)"
+                  :title="selectable(e.uid) ? 'Zum Übertragen auswählen' : 'Steht schon in WordPress'"
+                />
+                <div class="w-12 shrink-0 pt-px text-sm tabular-nums text-zinc-500">{{ e.time || "–" }}</div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-start gap-x-2 gap-y-1">
+                    <a v-if="e.url" :href="e.url" target="_blank" class="min-w-0 font-semibold text-zinc-900 underline-offset-2 hover:text-brand-700 hover:underline dark:text-zinc-100 dark:hover:text-brand-300">{{ e.artists.join(", ") || e.title }}</a>
+                    <span v-else class="min-w-0 font-semibold">{{ e.artists.join(", ") || e.title }}</span>
+                    <span v-if="e.status" class="badge badge-amber">{{ e.status }}</span>
+                  </div>
+                  <p class="mt-0.5 flex items-center gap-1 text-sm text-zinc-600 dark:text-zinc-400">
+                    <Icon name="map-pin" :size="13" class="text-zinc-400" />
+                    {{ [e.venue, e.city].filter(Boolean).join(", ") }}<template v-if="e.country && e.country !== 'DE'"> ({{ e.country }})</template>
+                  </p>
+                  <p v-if="e.info" class="mt-0.5 text-xs text-zinc-500">{{ e.info }}</p>
+                  <p v-if="checkOf(e.uid)?.state === 'dublette'" class="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    Steht schon in WordPress:
+                    <a :href="checkOf(e.uid)!.existing!.edit_link" target="_blank" class="font-medium underline underline-offset-2">{{ checkOf(e.uid)!.existing!.title }}</a>
+                    ({{ sourceName(checkOf(e.uid)!.existing!.source) }}) – wird nicht nochmal angelegt
+                  </p>
                 </div>
-                <p class="text-zinc-600 dark:text-zinc-400">
-                  {{ [e.venue, e.city].filter(Boolean).join(", ") }}<template v-if="e.country && e.country !== 'DE'"> ({{ e.country }})</template>
-                </p>
-                <p v-if="e.info" class="text-xs text-zinc-500">{{ e.info }}</p>
-                <p v-if="checkOf(e.uid)?.state === 'dublette'" class="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
-                  Steht schon in WordPress:
-                  <a :href="checkOf(e.uid)!.existing!.edit_link" target="_blank" class="underline underline-offset-2">{{ checkOf(e.uid)!.existing!.title }}</a>
-                  ({{ sourceName(checkOf(e.uid)!.existing!.source) }}) – wird nicht nochmal angelegt
-                </p>
-              </div>
-            </li>
-          </ul>
+                <div class="flex shrink-0 flex-col items-end gap-1">
+                  <template v-for="c in [checkOf(e.uid)]" :key="e.uid + 'c'">
+                    <a
+                      v-if="c"
+                      :href="c.existing?.edit_link"
+                      target="_blank"
+                      class="badge"
+                      :class="[STATES[c.state][1], !c.existing && 'pointer-events-none']"
+                      :title="c.changes?.length ? `Ändert: ${c.changes.map((f) => FIELD_LABELS[f] ?? f).join(', ')}` : c.existing ? 'In WordPress öffnen' : ''"
+                    >{{ STATES[c.state][0] }}</a>
+                  </template>
+                  <span class="badge">{{ sourceName(e.source) }}</span>
+                </div>
+              </li>
+            </ul>
+          </section>
         </div>
       </section>
     </div>

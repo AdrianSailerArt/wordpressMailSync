@@ -43,8 +43,8 @@ const seconds = (s: TraceStage) => (s.stats ? `${(s.stats.ms / 1000).toFixed(1)}
       {{ trace.relevant ? "als Musik-News erkannt" : trace.reason }}
     </p>
 
-    <section v-for="(s, i) in trace.stages" :key="i" class="rounded-lg border border-zinc-200 dark:border-zinc-800">
-      <header class="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-zinc-200 px-3 py-2 text-xs dark:border-zinc-800">
+    <section v-for="(s, i) in trace.stages" :key="i" class="rounded-xl ring-1 ring-zinc-950/5 dark:ring-white/10">
+      <header class="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-zinc-950/5 px-3 py-2 text-xs dark:border-white/10">
         <span class="font-medium">{{ s.stage === "check" ? "1" : "2" }} · {{ stageLabel(s.stage) }}</span>
         <span class="text-zinc-500">{{ formatDate(s.at) }}</span>
         <span class="ml-auto flex gap-3 tabular-nums text-zinc-500">
@@ -54,10 +54,10 @@ const seconds = (s: TraceStage) => (s.stats ? `${(s.stats.ms / 1000).toFixed(1)}
           <span v-if="s.stats?.tokensPerSec" title="Geschwindigkeit">{{ s.stats.tokensPerSec }} Tok/s</span>
         </span>
       </header>
-      <p v-if="s.error" class="border-b border-zinc-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-zinc-800 dark:bg-rose-950 dark:text-rose-300">
+      <p v-if="s.error" class="border-b border-zinc-950/5 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-white/10 dark:bg-rose-500/10 dark:text-rose-300">
         {{ s.error }}
       </p>
-      <div class="divide-y divide-zinc-100 dark:divide-zinc-900">
+      <div class="divide-y divide-zinc-950/5 dark:divide-white/5">
         <details class="group px-3 py-2">
           <summary class="cursor-pointer text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Anweisung an das Modell ({{ s.system.length }} Zeichen)</summary>
           <pre class="mt-2 max-h-80 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs text-zinc-600 dark:text-zinc-400">{{ s.system }}</pre>

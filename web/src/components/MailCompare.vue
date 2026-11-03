@@ -25,13 +25,12 @@ const kept = computed(() => {
     <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-zinc-500">
       <span class="flex items-center gap-1.5"><span class="size-2 rounded-sm bg-rose-200 dark:bg-rose-900" /> nur im Original</span>
       <span class="flex items-center gap-1.5"><span class="size-2 rounded-sm bg-emerald-200 dark:bg-emerald-900" /> neu im Beitrag</span>
-      <span class="tabular-nums">{{ kept }} % wörtlich übernommen</span>
-      <div class="ml-auto flex rounded-md bg-zinc-100 p-0.5 dark:bg-zinc-900">
+      <span class="badge badge-brand tabular-nums">{{ kept }} % wörtlich übernommen</span>
+      <div class="segmented ml-auto">
         <button
           v-for="[id, label] in ([['split', 'Nebeneinander'], ['inline', 'Zusammen']] as const)"
           :key="id"
-          class="rounded px-2 py-0.5 transition-colors"
-          :class="layout === id ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-white' : 'hover:text-zinc-800 dark:hover:text-zinc-200'"
+          :aria-pressed="layout === id"
           @click="layout = id"
         >
           {{ label }}
@@ -42,7 +41,7 @@ const kept = computed(() => {
     <div v-if="layout === 'split'" class="grid gap-4 md:grid-cols-2">
       <div v-for="side in (['removed', 'added'] as const)" :key="side" class="min-w-0">
         <p class="eyebrow mb-2">{{ side === "removed" ? "Original-Mail" : "Beitrag" }}</p>
-        <div class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-200 p-4 text-sm leading-relaxed dark:border-zinc-800">
+        <div class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-zinc-950/[0.015] p-4 text-sm leading-relaxed ring-1 ring-zinc-950/5 dark:bg-white/[0.02] dark:ring-white/10">
           <template v-for="(p, i) in parts" :key="i">
             <span v-if="!p.added && !p.removed">{{ p.value }}</span>
             <mark v-else-if="side === 'removed' && p.removed" class="rounded-sm bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200">{{ p.value }}</mark>
@@ -52,7 +51,7 @@ const kept = computed(() => {
       </div>
     </div>
 
-    <div v-else class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-zinc-200 p-4 text-sm leading-relaxed dark:border-zinc-800">
+    <div v-else class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-zinc-950/[0.015] p-4 text-sm leading-relaxed ring-1 ring-zinc-950/5 dark:bg-white/[0.02] dark:ring-white/10">
       <template v-for="(p, i) in parts" :key="i">
         <!-- Leerzeichen anhängen, damit Gelöschtes nicht am folgenden Wort klebt -->
         <del v-if="p.removed" class="rounded-sm bg-rose-100 text-rose-900 decoration-rose-400 dark:bg-rose-950 dark:text-rose-200">{{ /\s$/.test(p.value) ? p.value : p.value + " " }}</del>

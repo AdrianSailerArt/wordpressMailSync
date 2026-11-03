@@ -29,7 +29,7 @@ export class WordPress {
   private async req(method: string, path: string, init: { query?: Record<string, string | number>; json?: unknown; body?: Uint8Array | string; headers?: Record<string, string> } = {}) {
     const url = new URL(`${this.api}/${path}`);
     for (const [k, v] of Object.entries(init.query ?? {})) url.searchParams.set(k, String(v));
-    const headers: Record<string, string> = { Authorization: this.auth, "User-Agent": "wordpress-mail-sync/0.2", ...init.headers };
+    const headers: Record<string, string> = { Authorization: this.auth, "User-Agent": "buehnenpost/0.3", ...init.headers };
     let body: Uint8Array | string | undefined = init.body;
     if (init.json !== undefined) {
       headers["Content-Type"] = "application/json";

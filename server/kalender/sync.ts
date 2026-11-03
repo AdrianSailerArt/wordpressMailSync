@@ -123,7 +123,7 @@ export class Kalender {
     const auth = "Basic " + Buffer.from(`${this.cfg.wp.user}:${this.cfg.wp.appPassword.replace(/\s+/g, "")}`).toString("base64");
     const res = await fetch(`${this.cfg.wp.url}/wp-json/konzertkalender/v1/${path}`, {
       method,
-      headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "wordpress-mail-sync/0.2" },
+      headers: { Authorization: auth, "Content-Type": "application/json", "User-Agent": "buehnenpost/0.3" },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(120_000),
     });

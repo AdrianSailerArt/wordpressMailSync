@@ -48,7 +48,7 @@ async function resolveRedirect(url: string): Promise<string> {
   let current = url;
   for (let hop = 0; hop < 6; hop++) {
     try {
-      const res = await fetch(current, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(8_000), headers: { "User-Agent": "Mozilla/5.0 (wordpress-mail-sync)" } });
+      const res = await fetch(current, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(8_000), headers: { "User-Agent": "Mozilla/5.0 (buehnenpost)" } });
       await res.body?.cancel(); // Inhalt interessiert nicht
       const next = res.headers.get("location");
       if (res.status < 300 || res.status >= 400 || !next) return current;
@@ -122,7 +122,7 @@ function usable(dim: { width: number; height: number }, bytes: number): boolean 
 /** Bild aus dem Netz laden – nur echte Bilder, mit Größen- und Zeitlimit. */
 async function download(url: string): Promise<ImageAttachment | null> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15_000), redirect: "follow", headers: { "User-Agent": "Mozilla/5.0 (wordpress-mail-sync)" } });
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000), redirect: "follow", headers: { "User-Agent": "Mozilla/5.0 (buehnenpost)" } });
     const type = (res.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
     if (!res.ok || !IMAGE_TYPES.includes(type)) return null;
     if (Number(res.headers.get("content-length") ?? 0) > MAX_BYTES) return null;

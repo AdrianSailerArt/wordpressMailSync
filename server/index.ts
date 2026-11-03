@@ -44,13 +44,20 @@ const lastKalender = (): KalenderResult | null => JSON.parse(store.getSetting("k
 /** `selected`: Anzahl einzeln übertragener Termine, `sources`: einzeln übertragene Quellen */
 const saveKalender = (result: KalenderResult, selected?: number, sources?: string[]) => {
   store.setSetting("kalender_last", JSON.stringify(result));
-  const failed = result.sources.filter((s) => s.error || s.sendError);
+  // Fehler ist nur, was dieses Mal schiefging: Übertragen gescheitert oder gar keine Quelle erreichbar.
+  // Einzelne Quellen ohne Abruf (z. B. Ticketmaster ohne Schlüssel) stehen nur als Hinweis dabei.
+  const sendFailed = result.sources.filter((s) => s.sendError);
+  const fetchFailed = result.sources.filter((s) => s.error);
+  const failed = sendFailed.length > 0 || (result.sources.length > 0 && fetchFailed.length === result.sources.length);
   const names = sources?.map((id) => result.sources.find((s) => s.id === id)?.name ?? id).join(", ");
   const what = selected
     ? `${selected} ausgewählte Termine übertragen`
     : names ? `${names} übertragen` : `${result.events.length} Termine${result.dryRun ? " (Probelauf)" : " übertragen"}`;
-  store.log(failed.length ? "error" : "run", "Konzertkalender",
-    `${what}${failed.length ? ` – Fehler bei ${failed.map((s) => s.name).join(", ")}` : ""}`);
+  const notes = [
+    sendFailed.length && `Übertragen fehlgeschlagen bei ${sendFailed.map((s) => s.name).join(", ")}`,
+    fetchFailed.length && `nicht abrufbar: ${fetchFailed.map((s) => s.name).join(", ")}`,
+  ].filter(Boolean);
+  store.log(failed ? "error" : "run", "Konzertkalender", `${what}${notes.length ? ` – ${notes.join(" · ")}` : ""}`);
   return result;
 };
 const kalenderLog = (line: string) => console.log(`[Kalender] ${line}`);
@@ -244,7 +251,7 @@ const api = new Hono()
     return c.json({ ok: true });
   })
   .post("/push/test", async (c) => {
-    await push.notify({ title: "Mail Sync", body: "Benachrichtigungen funktionieren.", url: "/", tag: "test" });
+    await push.notify({ title: "Bühnenpost", body: "Benachrichtigungen funktionieren.", url: "/", tag: "test" });
     return c.json({ ok: true });
   });
 

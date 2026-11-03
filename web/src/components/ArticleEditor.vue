@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, toRaw, watch } from "vue";
 import { api, type Article, type MailImages, type OriginalMail } from "../api";
+import Icon from "./Icon.vue";
 import MailCompare from "./MailCompare.vue";
 import MailView from "./MailView.vue";
 import TraceView from "./TraceView.vue";
@@ -66,40 +67,51 @@ function toggleVideo(id: string) {
 
 const kb = (bytes: number) => (bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round(bytes / 1e3)} KB`);
 
-const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-amber-400");
+const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-600 tabular-nums dark:text-amber-400");
 </script>
 
 <template>
-  <div v-if="!article.relevant" class="rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
-    <p class="font-medium">Keine Musik-Pressemitteilung</p>
-    <p class="mt-1 text-zinc-500">{{ article.reason }}</p>
-    <details class="mt-3">
-      <summary class="cursor-pointer text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">KI-Protokoll ansehen</summary>
+  <div v-if="!article.relevant" class="space-y-4">
+    <div class="alert alert-warn">
+      <Icon name="alert" class="mt-0.5" />
+      <div>
+        <p class="font-medium">Keine Musik-Pressemitteilung</p>
+        <p class="mt-0.5 opacity-80">{{ article.reason }}</p>
+      </div>
+    </div>
+    <details class="group">
+      <summary class="cursor-pointer text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">KI-Protokoll ansehen</summary>
       <TraceView class="mt-3" :uid="uid" />
     </details>
   </div>
 
-  <div v-else class="space-y-6">
+  <div v-else class="space-y-8">
     <!-- Titel & Kerndaten -->
-    <div class="space-y-4">
+    <section class="space-y-4">
       <div>
         <label class="label">Titel <span :class="hint(titleLen <= 90)">{{ titleLen }}/90</span></label>
-        <input v-model="draft.title" class="field text-base font-medium" />
+        <input v-model="draft.title" class="field !py-2.5 text-base font-semibold" />
       </div>
-      <div>
-        <label class="label">SEO-Titel <span :class="hint(seoLen > 0 && seoLen <= 60)">{{ seoLen }}/60</span></label>
-        <input v-model="draft.seo_title" class="field" />
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="label">SEO-Titel <span :class="hint(seoLen > 0 && seoLen <= 60)">{{ seoLen }}/60</span></label>
+          <input v-model="draft.seo_title" class="field" />
+        </div>
+        <div>
+          <label class="label">Fokus-Keyword</label>
+          <input v-model="draft.focus_keyword" class="field" />
+        </div>
       </div>
       <div>
         <label class="label">Meta-Description <span :class="hint(metaLen >= 120 && metaLen <= 155)">{{ metaLen }}/155</span></label>
         <textarea v-model="draft.meta_description" rows="2" class="field resize-none" />
       </div>
 
-      <button class="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200" @click="showMeta = !showMeta">
-        {{ showMeta ? "−" : "+" }} Keyword, Slug, Kategorie, Tags
+      <button class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200" @click="showMeta = !showMeta">
+        <Icon name="chevron" :size="14" class="transition-transform" :class="showMeta && 'rotate-90'" />
+        Slug, Kategorie, Tags, Auszug
       </button>
-      <div v-if="showMeta" class="grid gap-4 sm:grid-cols-2">
-        <div><label class="label">Fokus-Keyword</label><input v-model="draft.focus_keyword" class="field" /></div>
+      <div v-if="showMeta" class="grid gap-4 rounded-xl bg-zinc-950/[0.02] p-4 ring-1 ring-zinc-950/5 sm:grid-cols-2 dark:bg-white/[0.02] dark:ring-white/5">
         <div><label class="label">Slug</label><input v-model="draft.slug" class="field font-mono text-xs" /></div>
         <div>
           <label class="label">Kategorie</label>
@@ -107,42 +119,44 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-
             <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
           </select>
         </div>
-        <div><label class="label">Tags</label><input v-model="tagsText" class="field" /></div>
+        <div class="sm:col-span-2"><label class="label">Tags <span class="font-normal text-zinc-400">mit Komma trennen</span></label><input v-model="tagsText" class="field" /></div>
         <div class="sm:col-span-2"><label class="label">Auszug</label><textarea v-model="draft.excerpt" rows="2" class="field resize-none" /></div>
         <div v-if="draft.image_credit" class="sm:col-span-2"><label class="label">Fotocredit</label><input v-model="draft.image_credit" class="field" /></div>
       </div>
-    </div>
+    </section>
 
     <!-- Bilder -->
-    <div>
-      <div class="label">
-        <span>Bilder</span>
+    <section>
+      <div class="mb-3 flex items-center gap-2">
+        <Icon name="image" class="text-zinc-400" />
+        <h3 class="text-sm font-semibold">Bilder</h3>
+        <span v-if="images?.images.length" class="text-xs text-zinc-500">Klick = Beitragsbild · „+ Text“ = zusätzlich im Text</span>
         <button
           v-if="images?.images.length"
-          class="hover:text-zinc-800 dark:hover:text-zinc-200"
-          :class="thumbnailId === null && 'text-zinc-900 dark:text-white'"
+          class="btn btn-sm ml-auto"
+          :class="thumbnailId === null && '!ring-brand-500 text-brand-700 dark:text-brand-300'"
           @click="setThumbnail(thumbnailId === null ? '' : 'none')"
         >
-          {{ thumbnailId === null ? "✓ ohne Beitragsbild" : "ohne Beitragsbild" }}
+          <Icon v-if="thumbnailId === null" name="check" :size="13" />ohne Beitragsbild
         </button>
       </div>
 
-      <p v-if="!images" class="text-sm text-zinc-500">Bilder werden geladen …</p>
+      <div v-if="!images" class="grid grid-cols-3 gap-3 sm:grid-cols-5"><div v-for="n in 5" :key="n" class="skeleton aspect-square rounded-lg" /></div>
       <p v-else-if="!images.images.length" class="text-sm text-zinc-500">Keine brauchbaren Bilder in der Mail gefunden.</p>
-      <div v-else class="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+      <div v-else class="grid grid-cols-3 gap-3 sm:grid-cols-4 xl:grid-cols-6">
         <figure v-for="img in images.images" :key="img.id" class="group relative">
           <button
-            class="block aspect-square w-full overflow-hidden rounded-md bg-zinc-100 ring-offset-2 transition dark:bg-zinc-900 dark:ring-offset-zinc-950"
-            :class="thumbnailId === img.id ? 'ring-2 ring-zinc-900 dark:ring-white' : 'opacity-80 hover:opacity-100'"
-            :title="`Als Thumbnail verwenden – ${img.width}×${img.height}, ${kb(img.bytes)}`"
+            class="block aspect-square w-full overflow-hidden rounded-lg bg-zinc-100 ring-offset-2 ring-offset-white transition dark:bg-zinc-800 dark:ring-offset-zinc-900"
+            :class="thumbnailId === img.id ? 'ring-2 ring-brand-600 dark:ring-brand-400' : 'opacity-85 ring-1 ring-zinc-950/5 hover:opacity-100 dark:ring-white/10'"
+            :title="`Als Beitragsbild verwenden – ${img.width}×${img.height}, ${kb(img.bytes)}`"
             @click="setThumbnail(img.id)"
           >
-            <img :src="api.imageUrl(uid, img.id)" :alt="img.filename" loading="lazy" class="size-full object-cover" />
+            <img :src="api.imageUrl(uid, img.id)" :alt="img.filename" loading="lazy" class="size-full object-cover transition group-hover:scale-[1.03]" />
           </button>
-          <span v-if="thumbnailId === img.id" class="absolute left-1.5 top-1.5 rounded bg-zinc-900/80 px-1.5 py-0.5 text-[10px] font-medium text-white">Thumbnail</span>
+          <span v-if="thumbnailId === img.id" class="absolute top-1.5 left-1.5 rounded-md bg-brand-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow">Beitragsbild</span>
           <button
-            class="absolute right-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-medium transition"
-            :class="draft.inline_images.includes(img.id) ? 'bg-emerald-600 text-white' : 'bg-white/85 text-zinc-700 opacity-0 group-hover:opacity-100 dark:bg-zinc-900/85 dark:text-zinc-200'"
+            class="absolute top-1.5 right-1.5 rounded-md px-1.5 py-0.5 text-[10px] font-semibold shadow transition"
+            :class="draft.inline_images.includes(img.id) ? 'bg-emerald-600 text-white' : 'bg-white/90 text-zinc-700 opacity-0 group-hover:opacity-100 focus:opacity-100 dark:bg-zinc-900/90 dark:text-zinc-200'"
             title="Zusätzlich im Text nach der Einleitung einfügen"
             @click="toggleInline(img.id)"
           >
@@ -152,79 +166,77 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400" : "text-amber-600 dark:text-
         </figure>
       </div>
 
-      <div v-if="images?.videos.length" class="mt-5">
-        <div class="label"><span>Videos</span><span>cookiefrei: eigenes Vorschaubild mit Link zu YouTube</span></div>
-        <div class="grid gap-2 sm:grid-cols-2">
+      <div v-if="images?.videos.length" class="mt-6">
+        <div class="label"><span>Videos</span><span class="font-normal text-zinc-400">cookiefrei: eigenes Vorschaubild mit Link zu YouTube</span></div>
+        <div class="grid gap-3 sm:grid-cols-2">
           <button
             v-for="v in images.videos"
             :key="v.id"
-            class="flex items-center gap-3 rounded-md border p-2 text-left transition-colors"
-            :class="selectedVideos.includes(v.id) ? 'border-zinc-900 dark:border-white' : 'border-zinc-200 opacity-70 hover:opacity-100 dark:border-zinc-800'"
+            class="flex items-center gap-3 rounded-xl p-2 text-left ring-1 transition"
+            :class="selectedVideos.includes(v.id) ? 'bg-brand-50/60 ring-brand-500 dark:bg-brand-500/10 dark:ring-brand-400' : 'ring-zinc-950/10 opacity-75 hover:opacity-100 dark:ring-white/10'"
             @click="toggleVideo(v.id)"
           >
-            <span class="relative block aspect-video w-28 shrink-0 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-900">
+            <span class="relative block aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
               <img :src="`https://i.ytimg.com/vi/${v.id}/mqdefault.jpg`" :alt="v.title" loading="lazy" class="size-full object-cover" />
-              <span class="absolute inset-0 flex items-center justify-center text-lg text-white drop-shadow">▶</span>
+              <span class="absolute inset-0 flex items-center justify-center text-white drop-shadow"><Icon name="play" :size="20" /></span>
             </span>
             <span class="min-w-0 flex-1">
               <span class="line-clamp-2 text-sm font-medium">{{ v.title || v.id }}</span>
               <span class="block truncate text-xs text-zinc-500">{{ v.channel }}</span>
-              <span class="mt-1 block text-[11px]" :class="selectedVideos.includes(v.id) ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'">
-                {{ selectedVideos.includes(v.id) ? "✓ im Beitrag" : "nicht im Beitrag" }}
+              <span class="mt-1 inline-flex" :class="selectedVideos.includes(v.id) ? 'badge badge-green' : 'badge'">
+                {{ selectedVideos.includes(v.id) ? "im Beitrag" : "nicht im Beitrag" }}
               </span>
             </span>
           </button>
         </div>
       </div>
 
-      <ul v-if="images?.downloadLinks.length" class="mt-3 space-y-1 text-xs">
-        <li v-for="l in images.downloadLinks" :key="l.url" class="truncate">
-          <span class="text-zinc-500">Nur für dich, nicht im Artikel – Pressefotos: </span>
-          <a :href="l.url" target="_blank" rel="noopener" class="underline underline-offset-2">{{ l.label }}</a>
+      <ul v-if="images?.downloadLinks.length" class="mt-4 space-y-1 text-xs">
+        <li v-for="l in images.downloadLinks" :key="l.url" class="flex items-center gap-1.5 truncate">
+          <Icon name="download" :size="13" class="text-zinc-400" />
+          <span class="text-zinc-500">Nur für dich, nicht im Artikel – Pressefotos:</span>
+          <a :href="l.url" target="_blank" rel="noopener" class="truncate font-medium underline underline-offset-2">{{ l.label }}</a>
         </li>
       </ul>
-    </div>
+    </section>
 
     <!-- Ansicht -->
-    <div>
-      <div class="mb-4 flex gap-4 border-b border-zinc-200 text-sm dark:border-zinc-800">
-        <button
-          v-for="v in views"
-          :key="v.id"
-          class="-mb-px border-b pb-2 transition-colors"
-          :class="view === v.id ? 'border-zinc-900 text-zinc-900 dark:border-white dark:text-white' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'"
-          @click="view = v.id"
-        >
+    <section class="overflow-hidden rounded-xl ring-1 ring-zinc-950/5 dark:ring-white/10">
+      <div class="tabs bg-zinc-950/[0.02] dark:bg-white/[0.02]" role="tablist">
+        <button v-for="v in views" :key="v.id" role="tab" :aria-selected="view === v.id" @click="view = v.id">
           {{ v.label }}
         </button>
       </div>
 
-      <article v-if="view === 'preview'" class="prose prose-zinc max-w-none dark:prose-invert prose-headings:font-semibold prose-h2:text-lg">
-        <h1 class="!text-2xl">{{ draft.title }}</h1>
-        <div v-html="draft.content_html" />
-      </article>
+      <div class="p-4 sm:p-5">
+        <article v-if="view === 'preview'" class="prose prose-zinc mx-auto max-w-3xl dark:prose-invert prose-headings:font-semibold prose-h2:text-lg prose-a:text-brand-700 dark:prose-a:text-brand-300">
+          <h1 class="!text-2xl">{{ draft.title }}</h1>
+          <div v-html="draft.content_html" />
+        </article>
 
-      <template v-else-if="view === 'original' || view === 'compare'">
-        <p v-if="!original" class="text-sm text-zinc-500">Original wird geladen …</p>
-        <MailView v-else-if="view === 'original'" :uid="uid" :original="original" :article="draft" />
-        <MailCompare v-else :original="original.body" :html="draft.content_html" :title="draft.title" />
-      </template>
+        <template v-else-if="view === 'original' || view === 'compare'">
+          <div v-if="!original" class="space-y-3"><div v-for="n in 4" :key="n" class="skeleton h-3" /></div>
+          <MailView v-else-if="view === 'original'" :uid="uid" :original="original" :article="draft" />
+          <MailCompare v-else :original="original.body" :html="draft.content_html" :title="draft.title" />
+        </template>
 
-      <TraceView v-else-if="view === 'trace'" :uid="uid" />
+        <TraceView v-else-if="view === 'trace'" :uid="uid" />
 
-      <textarea v-else v-model="draft.content_html" rows="24" class="field font-mono text-xs leading-relaxed" />
-    </div>
+        <textarea v-else v-model="draft.content_html" rows="24" class="field font-mono text-xs leading-relaxed" />
+      </div>
+    </section>
 
     <!-- Aktionen -->
-    <div class="sticky bottom-0 -mx-1 flex items-center gap-2 bg-white/90 px-1 py-3 backdrop-blur dark:bg-zinc-950/90">
-      <span class="mr-auto text-xs text-zinc-500">
+    <div class="sticky bottom-20 z-10 -mx-1 flex flex-wrap items-center gap-2 rounded-xl bg-white/90 px-3 py-2.5 shadow-lg ring-1 ring-zinc-950/5 backdrop-blur lg:bottom-4 dark:bg-zinc-900/90 dark:ring-white/10">
+      <span class="mr-auto flex items-center gap-1.5 text-xs" :class="dirty ? 'text-amber-700 dark:text-amber-400' : 'text-zinc-500'">
+        <span v-if="dirty" class="size-1.5 rounded-full bg-amber-500" />
         {{ dirty ? "Ungespeicherte Änderungen" : limitReached ? "Richtwert für heute erreicht – Veröffentlichen geht trotzdem" : article.generated_by ? `geschrieben von ${article.generated_by}` : "" }}
       </span>
       <button class="btn" :disabled="!dirty || !!busy" @click="emit('save', { ...draft, tags: tags() })">
-        {{ busy === "save" ? "Speichert …" : "Speichern" }}
+        <Icon name="save" />{{ busy === "save" ? "Speichert …" : "Speichern" }}
       </button>
-      <button class="btn btn-primary" :disabled="dirty || !!busy" @click="emit('publish')">
-        {{ busy === "publish" ? "Veröffentlicht …" : "Veröffentlichen" }}
+      <button class="btn btn-primary" :disabled="dirty || !!busy" :title="dirty ? 'Erst speichern' : 'In WordPress veröffentlichen'" @click="emit('publish')">
+        <Icon name="send" />{{ busy === "publish" ? "Veröffentlicht …" : "Veröffentlichen" }}
       </button>
     </div>
   </div>
