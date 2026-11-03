@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { looksRelevant, parseMessage } from "../server/mail.ts";
-import { ArticleSchema, cleanArticle, slugify } from "../server/rewrite.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ImageStore } from "../server/images.ts";
+import { extractImageLinks, looksRelevant, parseMessage, type PressMail } from "../server/mail.ts";
+import { ArticleSchema, cleanArticle, slugify, tidyContent } from "../server/rewrite.ts";
 
 function rawMail(subject: string, html: string, image?: Buffer): Buffer {
   const boundary = "XYZ";
@@ -24,9 +28,24 @@ describe("Mail", () => {
     expect(looksRelevant(mail)).toBe(true);
   });
 
-  test("kleine Bilder werden ignoriert, große übernommen", async () => {
-    expect((await parseMessage(1, rawMail("Tour", "<p>x</p>", Buffer.alloc(100)))).images).toHaveLength(0);
-    expect((await parseMessage(1, rawMail("Tour", "<p>x</p>", Buffer.alloc(50_000)))).images).toHaveLength(1);
+  test("Bild-Anhänge werden eingelesen", async () => {
+    const mail = await parseMessage(1, rawMail("Tour", "<p>x</p>", Buffer.alloc(100)));
+    expect(mail.images).toHaveLength(1);
+    expect(mail.images[0]!.contentType).toBe("image/jpeg");
+  });
+
+  test("Bild- und Download-Links werden erkannt, Pixel und Icons nicht", () => {
+    const { imageUrls, downloadLinks } = extractImageLinks(`
+      <img src="https://cdn.example/foto.jpg?x=1&amp;y=2">
+      <img src="https://track.example/pixel.gif" width="1" height="1">
+      <img src="https://cdn.example/icon.png" width="24" height="24">
+      <img src="cid:abc">
+      <a href="https://cdn.example/hires.png">Hi-Res</a>
+      <a href="https://we.tl/t-abc">hier</a>
+      <a href="https://label.example/presse">Pressefotos herunterladen</a>
+      <a href="https://label.example/shop">Shop</a>`);
+    expect(imageUrls).toEqual(["https://cdn.example/foto.jpg?x=1&y=2", "https://cdn.example/hires.png"]);
+    expect(downloadLinks.map((l) => l.url)).toEqual(["https://we.tl/t-abc", "https://label.example/presse"]);
   });
 
   test("Vorfilter verwirft Rechnungen", async () => {
@@ -35,6 +54,17 @@ describe("Mail", () => {
 });
 
 describe("Artikel", () => {
+  test("Formfehler lokaler Modelle werden bereinigt", () => {
+    expect(tidyContent("<h2>Überschrift</h2><p>Die Band **ANKOR** spielt am 1.04.2027 und 12.03.2027.</p><h2>Termine</h2>"))
+      .toBe("<p>Die Band <strong>ANKOR</strong> spielt am 01.04.2027 und 12.03.2027.</p><h2>Termine</h2>");
+    const a = cleanArticle(ArticleSchema.parse({
+      relevant: true, reason: "", title: "**ANKOR** Tour", meta_description: "Die Band **ANKOR** kommt *bald*.",
+      excerpt: "**Neu:** Tour", content_html: "<p>x</p>",
+    }), ["News"]);
+    expect([a.title, a.meta_description, a.excerpt]).toEqual(["ANKOR Tour", "Die Band ANKOR kommt bald.", "Neu: Tour"]);
+    expect(a.seo_title).toBe("ANKOR Tour");
+  });
+
   test("slugify", () => {
     expect(slugify("Die Ärzte: Tour 2027 – alle Termine!")).toBe("die-aerzte-tour-2027-alle-termine");
   });
@@ -57,5 +87,47 @@ describe("Artikel", () => {
     expect(cleaned.slug).toBe("mein-slug");
     expect(cleaned.meta_description.length).toBeLessThanOrEqual(160);
     expect(cleaned.tags).toEqual(["a", "b"]);
+  });
+});
+
+/** Minimale PNG-Datei mit gewünschten Maßen (reicht zum Ausmessen) und Füllbytes. */
+function png(width: number, height: number, bytes = 50_000): Buffer {
+  const head = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(head, 0);
+  head.writeUInt32BE(13, 8);
+  head.write("IHDR", 12, "ascii");
+  head.writeUInt32BE(width, 16);
+  head.writeUInt32BE(height, 20);
+  head[24] = 8; head[25] = 2;
+  return Buffer.concat([head, Buffer.alloc(Math.max(0, bytes - 33), width % 251)]);
+}
+
+describe("Bilder", () => {
+  test("Logos, Banner und Doppelte werden aussortiert, größtes Bild zuerst", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wms-img-"));
+    try {
+      const att = (name: string, data: Buffer) => ({ filename: name, contentType: "image/png", data });
+      const mail: PressMail = {
+        uid: 1, messageId: "<bilder@test>", subject: "", sender: "", date: "", body: "",
+        images: [
+          att("logo.png", png(300, 120)),
+          att("banner.png", png(1200, 150)),
+          att("winzig.png", png(800, 600, 2_000)),
+          att("cover.png", png(1500, 1500)),
+          att("bandfoto.png", png(2400, 1600)),
+          att("bandfoto-kopie.png", png(2400, 1600)),
+        ],
+      };
+      const store = new ImageStore(dir);
+      const { images } = await store.collect(mail);
+      expect(images.map((i) => i.filename)).toEqual(["bandfoto.png", "cover.png"]);
+      expect(images[0]).toMatchObject({ width: 2400, height: 1600, origin: "anhang" });
+
+      const read = await store.read(mail, images[1]!.id);
+      expect(read?.data.length).toBe(50_000);
+      expect(await store.read(mail, "../../etc/passwd")).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

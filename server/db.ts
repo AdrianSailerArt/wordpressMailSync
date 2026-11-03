@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { ArticleSchema, type Article } from "./rewrite.ts";
 
-export type LogKind = "published" | "skipped" | "error" | "run";
+export type LogKind = "published" | "suggested" | "skipped" | "error" | "run";
 
 export interface LogEntry {
   id: number;
@@ -27,6 +27,8 @@ export class Store {
       uid INTEGER PRIMARY KEY, article TEXT NOT NULL, updated_at TEXT NOT NULL)`);
     this.db.run(`CREATE TABLE IF NOT EXISTS processed (
       message_id TEXT PRIMARY KEY, status TEXT NOT NULL, ts TEXT NOT NULL)`);
+    this.db.run(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL, created_at TEXT NOT NULL)`);
     this.db.run(`CREATE TABLE IF NOT EXISTS log (
       id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, kind TEXT NOT NULL,
       subject TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '')`);
@@ -58,6 +60,20 @@ export class Store {
 
   processedIds(): Set<string> {
     return new Set(this.db.query<{ message_id: string }, []>("SELECT message_id FROM processed").all().map((r) => r.message_id));
+  }
+
+  addSubscription(sub: { endpoint: string }): void {
+    this.db.query("INSERT OR REPLACE INTO push_subscriptions (endpoint, subscription, created_at) VALUES (?, ?, ?)")
+      .run(sub.endpoint, JSON.stringify(sub), new Date().toISOString());
+  }
+
+  removeSubscription(endpoint: string): void {
+    this.db.query("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+  }
+
+  subscriptions<T>(): T[] {
+    return this.db.query<{ subscription: string }, []>("SELECT subscription FROM push_subscriptions").all()
+      .map((r) => JSON.parse(r.subscription) as T);
   }
 
   log(kind: LogKind, subject = "", detail = "", link = ""): void {

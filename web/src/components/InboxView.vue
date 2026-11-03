@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
-import { api, formatDate, type Article, type MailSummary, type OriginalMail, type Status } from "../api";
+import { api, formatDate, type Article, type MailImages, type MailSummary, type OriginalMail, type Status } from "../api";
 import ArticleEditor from "./ArticleEditor.vue";
 
-const props = defineProps<{ status: Status | null }>();
-const emit = defineEmits<{ changed: [] }>();
+const props = defineProps<{ status: Status | null; openUid?: number | null }>();
+const emit = defineEmits<{ changed: []; opened: [] }>();
 
 const mails = ref<MailSummary[]>([]);
 const loading = ref(true);
@@ -12,6 +12,10 @@ const error = ref("");
 const selected = ref<MailSummary | null>(null);
 const article = ref<Article | null>(null);
 const original = ref<OriginalMail | null>(null);
+const images = ref<MailImages | null>(null);
+const filter = ref<"all" | "drafts">("all");
+const visible = computed(() => (filter.value === "drafts" ? mails.value.filter((m) => m.hasDraft) : mails.value));
+const draftCount = computed(() => mails.value.filter((m) => m.hasDraft).length);
 const busy = ref<"" | "preview" | "publish" | "skip" | "save">("");
 const notice = ref("");
 const detail = ref<HTMLElement | null>(null);
@@ -23,6 +27,13 @@ async function load() {
   try {
     mails.value = await api.mails();
     error.value = "";
+    // aus einer Benachrichtigung geöffnet → passende Mail direkt anzeigen
+    const target = props.openUid && mails.value.find((m) => m.uid === props.openUid);
+    if (target) {
+      filter.value = "drafts";
+      emit("opened");
+      select(target);
+    }
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
@@ -47,6 +58,7 @@ async function select(mail: MailSummary) {
   selected.value = mail;
   article.value = null;
   original.value = null;
+  images.value = null;
   notice.value = "";
   // Auf schmalen Bildschirmen steht der Inhalt unter der Liste – dorthin springen
   if (!window.matchMedia("(min-width: 1024px)").matches) {
@@ -56,6 +68,10 @@ async function select(mail: MailSummary) {
   api.original(mail.uid).then((o) => {
     if (selected.value?.uid === mail.uid) original.value = o;
   }).catch(() => undefined);
+  // Bilder ebenfalls parallel – beim ersten Mal werden verlinkte Bilder heruntergeladen
+  api.images(mail.uid).then((r) => {
+    if (selected.value?.uid === mail.uid) images.value = r;
+  }).catch(() => (images.value = { images: [], downloadLinks: [] }));
   if (mail.hasDraft) await preview(false);
 }
 
@@ -100,6 +116,7 @@ function removeSelected() {
   selected.value = null;
   article.value = null;
   original.value = null;
+  images.value = null;
   emit("changed");
 }
 
@@ -113,15 +130,23 @@ onMounted(load);
   <div class="grid gap-8 lg:grid-cols-[20rem_1fr]">
     <!-- Liste -->
     <section class="min-w-0">
-      <div class="mb-2 flex items-center justify-between">
-        <h2 class="eyebrow">Unbearbeitet · {{ mails.length }}</h2>
-        <button class="btn -mr-3 h-7 text-xs" :disabled="loading" @click="load">Neu laden</button>
+      <div class="mb-2 flex items-center gap-3">
+        <button
+          v-for="[id, label] in ([['all', `Alle · ${mails.length}`], ['drafts', `Vorschläge · ${draftCount}`]] as const)"
+          :key="id"
+          class="eyebrow transition-colors"
+          :class="filter === id ? '!text-zinc-900 dark:!text-white' : 'hover:!text-zinc-600 dark:hover:!text-zinc-300'"
+          @click="filter = id"
+        >
+          {{ label }}
+        </button>
+        <button class="btn -mr-3 ml-auto h-7 text-xs" :disabled="loading" @click="load">Neu laden</button>
       </div>
 
       <p v-if="loading" class="py-6 text-sm text-zinc-500">Postfach wird gelesen …</p>
-      <p v-else-if="!mails.length" class="py-6 text-sm text-zinc-500">Keine neuen Mails.</p>
+      <p v-else-if="!visible.length" class="py-6 text-sm text-zinc-500">{{ filter === "drafts" ? "Noch keine Vorschläge." : "Keine neuen Mails." }}</p>
       <ul v-else class="-mx-2 max-h-[75vh] overflow-y-auto">
-        <li v-for="m in mails" :key="m.uid">
+        <li v-for="m in visible" :key="m.uid">
           <button
             class="w-full rounded-md px-2 py-2.5 text-left transition-colors"
             :class="selected?.uid === m.uid ? 'bg-zinc-100 dark:bg-zinc-900' : 'hover:bg-zinc-50 dark:hover:bg-zinc-900/50'"
@@ -168,6 +193,8 @@ onMounted(load);
           v-else-if="article"
           :article="article"
           :original="original"
+          :images="images"
+          :uid="selected.uid"
           :categories="status?.config.categories ?? []"
           :busy="busy"
           :limit-reached="limitReached"

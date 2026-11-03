@@ -7,6 +7,7 @@ const error = ref("");
 
 const labels: Record<LogEntry["kind"], [string, string]> = {
   published: ["Veröffentlicht", "bg-emerald-500"],
+  suggested: ["Vorschlag", "bg-sky-500"],
   skipped: ["Übersprungen", "bg-zinc-300 dark:bg-zinc-700"],
   error: ["Fehler", "bg-rose-500"],
   run: ["Lauf", "bg-zinc-900 dark:bg-white"],

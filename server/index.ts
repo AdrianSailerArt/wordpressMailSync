@@ -1,4 +1,4 @@
-/** HTTP-Server: REST-API fürs Vue-Dashboard, Auslieferung des Builds und Zeitplan. */
+/** HTTP-Server: REST-API fürs Vue-Dashboard, Auslieferung des Builds und Zeitpläne. */
 
 import { Cron } from "croner";
 import { Hono } from "hono";
@@ -7,14 +7,28 @@ import { serveStatic } from "hono/bun";
 import { createApp } from "./app.ts";
 import { ArticleSchema } from "./rewrite.ts";
 
-const { cfg, store, pipeline } = createApp();
+const { cfg, store, push, pipeline } = createApp();
 
-const job = new Cron(cfg.limits.schedule, { timezone: cfg.limits.timezone, protect: true }, async () => {
+const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const at = (cron: Cron | null) => cron?.nextRun()?.toLocaleString("de-DE", { timeZone: cfg.limits.timezone }) ?? "–";
+
+/** Veröffentlichen (3× täglich) – lässt sich mit AUTO_PUBLISH=false abschalten. */
+const publishJob = cfg.limits.autoPublish
+  ? new Cron(cfg.limits.schedule, { timezone: cfg.limits.timezone, protect: true }, async () => {
+      try {
+        console.log(`[Veröffentlichen] ${(await pipeline.run()).message}`);
+      } catch (err) {
+        console.error(`[Veröffentlichen] Fehler: ${message(err)}`);
+      }
+    })
+  : null;
+
+/** Vorschläge (10× täglich) – erzeugt Entwürfe und benachrichtigt per Push. */
+const suggestJob = new Cron(cfg.limits.suggestSchedule, { timezone: cfg.limits.timezone, protect: true }, async () => {
   try {
-    const result = await pipeline.run();
-    console.log(`[Zeitplan] ${result.message}`);
+    console.log(`[Vorschlag] ${(await pipeline.suggest()).message}`);
   } catch (err) {
-    console.error(`[Zeitplan] Fehler: ${message(err)}`);
+    console.error(`[Vorschlag] Fehler: ${message(err)}`);
   }
 });
 
@@ -24,12 +38,12 @@ if (cfg.server.password) {
   app.use("*", basicAuth({ username: "admin", password: cfg.server.password }));
 }
 
-const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
 app.onError((err, c) => {
   console.error(`[${c.req.method} ${c.req.path}] ${message(err)}`);
   return c.json({ error: message(err) }, 500);
 });
+
+const uid = (c: { req: { param(k: "uid"): string } }) => Number(c.req.param("uid"));
 
 const api = new Hono()
   .get("/status", async (c) => {
@@ -39,7 +53,9 @@ const api = new Hono()
       limit,
       busy: pipeline.busy,
       schedule: cfg.limits.schedule,
-      nextRun: job.nextRun()?.toISOString() ?? null,
+      nextRun: publishJob?.nextRun()?.toISOString() ?? null,
+      nextSuggestion: suggestJob.nextRun()?.toISOString() ?? null,
+      pushSubscribers: push.count(),
       config: {
         site: cfg.llm.siteName,
         wpUrl: cfg.wp.url,
@@ -50,32 +66,54 @@ const api = new Hono()
         categories: cfg.wp.categories,
         timezone: cfg.limits.timezone,
         perRun: cfg.limits.perRun,
+        autoPublish: cfg.limits.autoPublish,
+        suggestSchedule: cfg.limits.suggestSchedule,
       },
     });
   })
   .get("/mails", async (c) => c.json(await pipeline.listMails()))
-  .get("/mails/:uid", async (c) => c.json(await pipeline.original(Number(c.req.param("uid")))))
-  .post("/mails/:uid/preview", async (c) =>
-    c.json(await pipeline.preview(Number(c.req.param("uid")), c.req.query("refresh") === "1")))
-  .put("/mails/:uid/draft", async (c) =>
-    c.json(pipeline.saveDraft(Number(c.req.param("uid")), ArticleSchema.parse(await c.req.json()))))
-  .post("/mails/:uid/publish", async (c) => c.json(await pipeline.publish(Number(c.req.param("uid")))))
+  .get("/mails/:uid", async (c) => c.json(await pipeline.original(uid(c))))
+  .get("/mails/:uid/images", async (c) => c.json(await pipeline.images(uid(c))))
+  .get("/mails/:uid/images/:id", async (c) => {
+    const img = await pipeline.image(uid(c), c.req.param("id"));
+    if (!img) return c.notFound();
+    return c.body(new Uint8Array(img.data), 200, { "Content-Type": img.contentType, "Cache-Control": "private, max-age=86400" });
+  })
+  .post("/mails/:uid/preview", async (c) => c.json(await pipeline.preview(uid(c), c.req.query("refresh") === "1")))
+  .put("/mails/:uid/draft", async (c) => c.json(pipeline.saveDraft(uid(c), ArticleSchema.parse(await c.req.json()))))
+  .post("/mails/:uid/publish", async (c) => c.json(await pipeline.publish(uid(c))))
   .post("/mails/:uid/skip", async (c) => {
-    await pipeline.skip(Number(c.req.param("uid")));
+    await pipeline.skip(uid(c));
     return c.json({ ok: true });
   })
   .post("/run", async (c) => c.json(await pipeline.run(c.req.query("dryRun") === "1")))
-  .get("/log", (c) => c.json(store.recentLog()));
+  .post("/suggest", async (c) => c.json(await pipeline.suggest()))
+  .get("/log", (c) => c.json(store.recentLog()))
+  .get("/push/key", (c) => c.json({ publicKey: push.publicKey }))
+  .post("/push/subscribe", async (c) => {
+    push.subscribe(await c.req.json());
+    return c.json({ ok: true });
+  })
+  .post("/push/unsubscribe", async (c) => {
+    push.unsubscribe(((await c.req.json()) as { endpoint: string }).endpoint);
+    return c.json({ ok: true });
+  })
+  .post("/push/test", async (c) => {
+    await push.notify({ title: "Mail Sync", body: "Benachrichtigungen funktionieren.", url: "/", tag: "test" });
+    return c.json({ ok: true });
+  });
 
 app.route("/api", api);
 app.use("/*", serveStatic({ root: "./web/dist" }));
 app.get("*", serveStatic({ path: "./web/dist/index.html" }));
 
-console.log(`Dashboard: http://${cfg.server.host}:${cfg.server.port}  ·  Zeitplan „${cfg.limits.schedule}“ (${cfg.limits.timezone}), nächster Lauf ${job.nextRun()?.toLocaleString("de-DE", { timeZone: cfg.limits.timezone })}`);
+console.log(`Dashboard: http://${cfg.server.host}:${cfg.server.port}`);
+console.log(`Vorschläge: „${cfg.limits.suggestSchedule}“ – nächster ${at(suggestJob)}`);
+console.log(publishJob ? `Veröffentlichen: „${cfg.limits.schedule}“ – nächstes ${at(publishJob)}` : "Automatisches Veröffentlichen ist aus (AUTO_PUBLISH=false)");
 
 export default {
   hostname: cfg.server.host,
   port: cfg.server.port,
   fetch: app.fetch,
-  idleTimeout: 255, // Claude-Aufrufe können eine Weile dauern
+  idleTimeout: 255, // Sprachmodell und Bild-Downloads können eine Weile dauern
 };

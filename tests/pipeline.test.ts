@@ -22,12 +22,16 @@ const MAILS = [
 
 let marks: [number, string][];
 let created: string[];
+let uploaded: { featured?: string; inline: string[] }[];
+let notified: string[];
 let today: number;
 let rewrites: number;
 
 function pipeline() {
   marks = [];
   created = [];
+  uploaded = [];
+  notified = [];
   rewrites = 0;
   return new Pipeline(cfg, {
     mailbox: {
@@ -39,8 +43,27 @@ function pipeline() {
     wordpress: {
       postsToday: async () => today,
       slugExists: async () => false,
-      createPost: async (a) => (created.push(a.slug), { id: 1, link: "https://wp/x" }),
+      createPost: async (a, featured, inline = []) => {
+        created.push(a.slug);
+        uploaded.push({ featured: featured?.filename, inline: inline.map((i) => i.filename) });
+        return { id: 1, link: "https://wp/x" };
+      },
     },
+    // Mail 4 hat zwei Bilder, das größte steht vorn
+    images: {
+      collect: async (m) => ({
+        images: m.uid === 4
+          ? [{ id: "aaaaaaaaaaaa", filename: "gross.jpg" }, { id: "bbbbbbbbbbbb", filename: "klein.jpg" }]
+            .map((i) => ({ ...i, origin: "verlinkt" as const, contentType: "image/jpeg", width: 1600, height: 900, bytes: 1 }))
+          : [],
+        downloadLinks: [],
+      }),
+      read: async (_m, id) => ({
+        id, origin: "verlinkt", filename: id === "aaaaaaaaaaaa" ? "gross.jpg" : "klein.jpg",
+        contentType: "image/jpeg", width: 1600, height: 900, bytes: 1, data: Buffer.from("x"),
+      }),
+    },
+    notifier: { notify: async (n) => void notified.push(n.body) },
     rewriter: {
       rewrite: async (m) => {
         rewrites++;
@@ -105,4 +128,39 @@ test("ohne IMAP-Markierungen: erledigte Mails kommen nicht wieder", async () => 
   const third = await p.run();
   expect(third.published).toHaveLength(0);
   expect(await p.listMails()).toHaveLength(0);
+});
+
+test("Thumbnail: automatisch das größte Bild, sonst die Auswahl aus dem Entwurf", async () => {
+  const p = pipeline();
+  await p.publish(4);
+  expect(uploaded[0]).toEqual({ featured: "gross.jpg", inline: [] });
+});
+
+test("Thumbnail und Bilder im Text gemäß Auswahl", async () => {
+  const p = pipeline();
+  const draft = await p.preview(4);
+  p.saveDraft(4, { ...draft, featured_image: "bbbbbbbbbbbb", inline_images: ["aaaaaaaaaaaa"] });
+  await p.publish(4);
+  expect(uploaded[0]).toEqual({ featured: "klein.jpg", inline: ["gross.jpg"] });
+});
+
+test("„Kein Beitragsbild“ wird respektiert", async () => {
+  const p = pipeline();
+  const draft = await p.preview(4);
+  p.saveDraft(4, { ...draft, featured_image: "none" });
+  await p.publish(4);
+  expect(uploaded[0]).toEqual({ featured: undefined, inline: [] });
+});
+
+test("Vorschlag: erzeugt Entwurf, benachrichtigt, veröffentlicht nichts", async () => {
+  const p = pipeline();
+  const result = await p.suggest();
+  // Mail 1 fällt durch den Vorfilter, Mail 2 ist laut Modell nicht relevant → Mail 3 wird vorgeschlagen
+  expect(result.suggested?.uid).toBe(3);
+  expect(notified).toEqual(["Band X – Tour 2027"]);
+  expect(created).toEqual([]);
+  expect(marks).toEqual([[2, SKIPPED_FLAG]]);
+
+  // zweiter Lauf schlägt die nächste Mail vor, nicht dieselbe noch einmal
+  expect((await p.suggest()).suggested?.uid).toBe(4);
 });

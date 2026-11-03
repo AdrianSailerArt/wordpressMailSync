@@ -13,12 +13,14 @@ const KEYWORDS =
   /tour|konzert|concert|live|festival|tickets?|album|single|\bep\b|release|veröffentlich|pressemitteilung|pressemeldung|press release|presseinfo|video|premiere|ankündig|announce|show|open\s?air/i;
 
 const MAX_BODY_CHARS = 40_000;
-const MIN_IMAGE_BYTES = 30_000; // Logos und Tracking-Pixel überspringen
+export const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 export interface ImageAttachment {
   filename: string;
   contentType: string;
   data: Buffer;
+  /** im HTML eingebettet (cid:) statt als echter Anhang */
+  inline?: boolean;
 }
 
 export interface PressMail {
@@ -29,7 +31,12 @@ export interface PressMail {
   sender: string;
   date: string;
   body: string;
+  /** Bild-Anhänge und eingebettete Bilder (ungefiltert – Logos sortiert images.ts aus) */
   images: ImageAttachment[];
+  /** Im HTML verlinkte Bilder (<img src>, Links auf .jpg/.png/.webp) */
+  imageUrls?: string[];
+  /** Links, hinter denen vermutlich Pressefotos liegen (WeTransfer, Dropbox, „Pressefotos“ …) */
+  downloadLinks?: { url: string; label: string }[];
 }
 
 export const looksRelevant = (mail: Pick<PressMail, "subject" | "body">) =>
@@ -47,13 +54,40 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
+const decodeEntities = (s: string) => s.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+const stripTags = (s: string) => decodeEntities(s.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+const DOWNLOAD_HINT = /wetransfer|we\.tl|dropbox|drive\.google|box\.com|pressefoto|press ?photo|pressebild|bildmaterial|artwork|hi-?res|download/i;
+
+/** Bild- und Download-Links aus dem HTML einer Mail ziehen. */
+export function extractImageLinks(html: string): Required<Pick<PressMail, "imageUrls" | "downloadLinks">> {
+  const urls = new Set<string>();
+  for (const tag of html.match(/<img\b[^>]*>/gi) ?? []) {
+    const src = tag.match(/\ssrc=["']([^"']+)["']/i)?.[1];
+    if (!src || !/^https?:/i.test(src)) continue;
+    // Tracking-Pixel und Icons mit kleiner Größenangabe gar nicht erst laden
+    const w = Number(tag.match(/\swidth=["']?(\d+)/i)?.[1] ?? 999);
+    const h = Number(tag.match(/\sheight=["']?(\d+)/i)?.[1] ?? 999);
+    if (w < 150 || h < 150) continue;
+    urls.add(decodeEntities(src));
+  }
+
+  const downloadLinks: { url: string; label: string }[] = [];
+  for (const [, href, inner] of html.matchAll(/<a\b[^>]*href=["'](https?:[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+    const url = decodeEntities(href!);
+    if (/\.(jpe?g|png|webp)(\?|$)/i.test(url)) urls.add(url);
+    else if (DOWNLOAD_HINT.test(url) || DOWNLOAD_HINT.test(stripTags(inner!))) {
+      if (!downloadLinks.some((l) => l.url === url)) downloadLinks.push({ url, label: stripTags(inner!).slice(0, 80) || url });
+    }
+  }
+  return { imageUrls: [...urls].slice(0, 25), downloadLinks: downloadLinks.slice(0, 10) };
+}
+
 export async function parseMessage(uid: number, source: Buffer): Promise<PressMail> {
   const parsed = await simpleParser(source);
   const body = parsed.html ? htmlToText(parsed.html) : (parsed.text ?? "");
   const images = parsed.attachments
-    .filter((a) => ["image/jpeg", "image/png", "image/webp"].includes(a.contentType) && a.size > MIN_IMAGE_BYTES)
-    .sort((a, b) => b.size - a.size)
-    .map((a) => ({ filename: a.filename ?? "bild.jpg", contentType: a.contentType, data: a.content }));
+    .filter((a) => IMAGE_TYPES.includes(a.contentType))
+    .map((a) => ({ filename: a.filename ?? "bild.jpg", contentType: a.contentType, data: a.content, inline: !!a.related }));
 
   return {
     uid,
@@ -63,6 +97,7 @@ export async function parseMessage(uid: number, source: Buffer): Promise<PressMa
     date: parsed.date?.toISOString() ?? "",
     body: body.trim().slice(0, MAX_BODY_CHARS),
     images,
+    ...(parsed.html ? extractImageLinks(parsed.html) : {}),
   };
 }
 

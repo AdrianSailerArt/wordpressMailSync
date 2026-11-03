@@ -4,6 +4,7 @@ export interface Article {
   relevant: boolean;
   reason: string;
   title: string;
+  seo_title: string;
   slug: string;
   focus_keyword: string;
   meta_description: string;
@@ -12,6 +13,25 @@ export interface Article {
   category: string;
   tags: string[];
   image_credit: string;
+  /** "" = automatisch (größtes Bild), "none" = kein Beitragsbild, sonst Bild-ID */
+  featured_image: string;
+  inline_images: string[];
+}
+
+export interface ImageInfo {
+  id: string;
+  origin: "anhang" | "eingebettet" | "verlinkt";
+  filename: string;
+  contentType: string;
+  width: number;
+  height: number;
+  bytes: number;
+  url?: string;
+}
+
+export interface MailImages {
+  images: ImageInfo[];
+  downloadLinks: { url: string; label: string }[];
 }
 
 export interface MailSummary {
@@ -31,6 +51,8 @@ export interface Status {
   busy: boolean;
   schedule: string;
   nextRun: string | null;
+  nextSuggestion: string | null;
+  pushSubscribers: number;
   config: {
     site: string;
     wpUrl: string;
@@ -41,13 +63,15 @@ export interface Status {
     categories: string[];
     timezone: string;
     perRun: number;
+    autoPublish: boolean;
+    suggestSchedule: string;
   };
 }
 
 export interface LogEntry {
   id: number;
   ts: string;
-  kind: "published" | "skipped" | "error" | "run";
+  kind: "published" | "suggested" | "skipped" | "error" | "run";
   subject: string;
   detail: string;
   link: string;
@@ -89,6 +113,10 @@ export const api = {
   publish: (uid: number) => call<{ id: number; link: string }>("POST", `/mails/${uid}/publish`),
   skip: (uid: number) => call<{ ok: true }>("POST", `/mails/${uid}/skip`),
   run: (dryRun: boolean) => call<RunResult>("POST", `/run${dryRun ? "?dryRun=1" : ""}`),
+  suggest: () => call<{ suggested: { uid: number; title: string } | null; message: string }>("POST", "/suggest"),
+  images: (uid: number) => call<MailImages>("GET", `/mails/${uid}/images`),
+  imageUrl: (uid: number, id: string) => `/api/mails/${uid}/images/${id}`,
+  testPush: () => call<{ ok: true }>("POST", "/push/test"),
 };
 
 export const formatDate = (iso: string | null) =>

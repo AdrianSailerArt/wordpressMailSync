@@ -7,7 +7,10 @@ Beiträge pro Tag**. Läuft komplett auf deinem Mac, ohne API-Key und ohne laufe
 
 Mit **Vue-Dashboard** (Tailwind CSS, hell/dunkel): Postfach ansehen, Beiträge vorab generieren,
 generierten Text **wortweise mit der Original-Mail vergleichen**, Titel/Meta/Text bearbeiten,
-gezielt veröffentlichen oder überspringen, Verlauf aller Aktionen.
+**Thumbnail und Bilder auswählen**, gezielt veröffentlichen oder überspringen, Verlauf aller Aktionen.
+
+**10× am Tag** wird automatisch ein Vorschlag erzeugt – du bekommst eine
+**Chrome-Benachrichtigung** und entscheidest im Dashboard, ob er online geht.
 
 **Stack:** [Bun](https://bun.sh) + TypeScript · Hono · bun:sqlite · Vue 3 + Vite + Tailwind CSS ·
 [Ollama](https://ollama.com) (gemma4) – optional Claude-API
@@ -25,17 +28,34 @@ IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ─�
 2. **Mails holen** – alle unbearbeiteten Mails der letzten `MAX_AGE_DAYS` Tage, neueste
    zuerst. Der Gelesen-Status bleibt unverändert.
 3. **Vorfilter** – Mails ohne Musik-Stichworte werden ohne KI-Aufruf übersprungen.
-4. **Sprachmodell** prüft die Relevanz und schreibt neu: eigener Text, Fakten exakt
-   übernommen, Fokus-Keyword, SEO-Titel, Meta-Description, Slug, Zwischenüberschriften,
-   Tourdaten als Liste, Kategorie und Tags (≈ 30 s pro Mail mit gemma4).
-5. **WordPress** – Beitrag mit Kategorie, Tags, Auszug, SEO-Meta (Yoast/Rank Math) und dem
-   größten Bild-Anhang als Beitragsbild.
-6. **Markieren** – IMAP-Keyword `$PressbotDone` bzw. `$PressbotSkipped` (optional zusätzlich
-   in `IMAP_PROCESSED_FOLDER` verschoben) – nichts wird doppelt verarbeitet.
+4. **Sprachmodell, Stufe 1** – strenge Prüfung „Geht es um konkrete Musiker:innen, Bands oder
+   Festivals?“ (≈ 10 s). Technik-, Wirtschafts- und Startup-Meldungen fliegen hier raus.
+5. **Sprachmodell, Stufe 2** – schreibt den Beitrag nach dem
+   [Stil-Regelwerk](stil/regelwerk.md): Titel im Hausformat, SEO-Titel, Meta-Description,
+   Fokus-Keyword, Zwischenüberschriften, Tourdaten, Kategorie und Tags (≈ 30–60 s).
+6. **Bilder** – Anhänge, eingebettete und verlinkte Bilder der Mail werden gesammelt; Logos,
+   Icons, Banner und Tracking-Pixel fliegen nach Größe raus. Das größte Bild wird Thumbnail,
+   im Dashboard lässt sich das ändern und weitere Bilder in den Text einfügen.
+7. **WordPress** – Beitrag mit Kategorie, Tags, Auszug, Yoast-Feldern, Beitragsbild und
+   optional Bildern im Text.
+8. **Merken** – erledigte Mails stehen in der lokalen Datenbank (zusätzlich IMAP-Keyword, wo
+   der Server das erlaubt) – nichts wird doppelt verarbeitet.
 
-Der eingebaute Zeitplan (`SCHEDULE`, Standard 8/13/18 Uhr) veröffentlicht pro Lauf einen
-Beitrag → drei Beiträge über den Tag verteilt. **Der Mac muss dafür an und wach sein**;
-ein verpasster Lauf wird nicht nachgeholt – dann einfach im Dashboard „Jetzt ausführen“.
+### Zeitpläne
+
+| Was | Standard | Einstellung |
+|---|---|---|
+| Vorschlag erzeugen + Chrome-Benachrichtigung | 10× täglich (8, 9, 11, 12, 14, 15, 17, 18, 20, 21 Uhr) | `SUGGEST_SCHEDULE` |
+| Automatisch veröffentlichen (max. 1 pro Lauf, 3 pro Tag) | 8, 13, 18 Uhr | `SCHEDULE`, abschalten mit `AUTO_PUBLISH=false` |
+
+**Der Mac muss dafür an und wach sein**; verpasste Läufe werden nicht nachgeholt. Im
+Dashboard lassen sich beide jederzeit von Hand auslösen („Vorschlag“, „Ausführen“).
+
+### Chrome-Benachrichtigungen
+
+Im Dashboard oben auf die **Glocke** klicken und Benachrichtigungen erlauben – es kommt sofort
+eine Test-Nachricht. Danach meldet sich Chrome bei jedem neuen Vorschlag, auch wenn das
+Dashboard-Tab geschlossen ist (Chrome muss laufen). Ein Klick öffnet direkt den Vorschlag.
 
 ## Einrichtung
 
@@ -51,6 +71,17 @@ ein verpasster Lauf wird nicht nachgeholt – dann einfach im Dashboard „Jetzt
 - Als dieser Benutzer: *Profil → Anwendungspasswörter* → neues Passwort erzeugen.
 - Für SEO-Felder: [`wordpress/pressbot-seo-meta.php`](wordpress/pressbot-seo-meta.php) nach
   `wp-content/mu-plugins/` kopieren und `SEO_PLUGIN=yoast` oder `rankmath` setzen.
+- Kategorien über den Slug zuordnen, weil Namen wie „News“ oft mehrfach vorkommen:
+  `WP_CATEGORIES=News=music-news,Events=events`.
+- Liefert die REST-API trotz Anwendungspasswort „rest_login_required“, reicht der Server die
+  Anmeldung nicht weiter (z. B. bei DomainFactory). Dann am Anfang der `.htaccess` ergänzen:
+  ```apache
+  SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+  <IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  </IfModule>
+  ```
 
 ### 3. Starten
 
@@ -85,11 +116,20 @@ sh scripts/autostart-macos.sh --remove   # wieder entfernen
 - Anderes lokales Modell: `OLLAMA_MODEL=…` (z. B. `gemma3:4b` – schneller, schwächer).
 - Claude statt lokal: `LLM_PROVIDER=claude` und `ANTHROPIC_API_KEY` setzen.
 
+## Stil-Regelwerk
+
+[`stil/regelwerk.md`](stil/regelwerk.md) beschreibt, wie die Redaktion schreibt (Ansprache,
+Einstieg, Aufbau je Meldungsart, Titelformate, Termine, Links). Es wurde aus Artikeln von
+tribe-online.de abgeleitet und wird jedem Schreibauftrag mitgegeben. Einfach bearbeiten und
+den Server neu starten; anderer Pfad über `STYLE_FILE`.
+
 ## Projektstruktur
 
 ```
-server/      Bun-Backend: config, mail (IMAP), rewrite (Ollama/Claude), wordpress, pipeline, db, index (API + Zeitplan), cli, demo
-web/         Vue-3-Dashboard (Vite)
+server/      Bun-Backend: config, mail (IMAP), images (Bilder), rewrite (Ollama/Claude), wordpress,
+             pipeline, push (Benachrichtigungen), db, index (API + Zeitpläne), cli, demo
+stil/        Stil-Regelwerk der Redaktion
+web/         Vue-3-Dashboard (Vite, Tailwind) inkl. Service Worker für Push
 tests/       bun test
 scripts/     Autostart für macOS
 wordpress/   MU-Plugin für die SEO-Felder
@@ -98,7 +138,10 @@ wordpress/   MU-Plugin für die SEO-Felder
 ## Hinweise
 
 - Pressefotos werden mit dem Fotocredit aus der Mail als Bildunterschrift gesetzt; prüfe bei
-  Bedarf die Nutzungsbedingungen der Agentur.
+  Bedarf die Nutzungsbedingungen der Agentur. Download-Links (WeTransfer, Dropbox …) zeigt das
+  Dashboard an, lädt sie aber nicht automatisch.
+- Beim Laden verlinkter Bilder sieht der Absender ggf., dass die Mail „geöffnet“ wurde
+  (wie bei jedem Mailprogramm, das Bilder anzeigt).
 - E-Mail-Inhalte gelten als nicht vertrauenswürdig: Das Modell ist angewiesen, Anweisungen in
   Mails zu ignorieren, und das erzeugte HTML wird vor dem Veröffentlichen auf eine
   Tag-Whitelist bereinigt.

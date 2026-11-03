@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { api, formatDate, type RunResult, type Status } from "./api";
+import { disablePush, enablePush, onOpenRequest, pushState, type PushState } from "./push";
 import InboxView from "./components/InboxView.vue";
 import LogList from "./components/LogList.vue";
 
@@ -17,6 +18,43 @@ const error = ref("");
 const running = ref(false);
 const runResult = ref<RunResult | null>(null);
 const refreshKey = ref(0);
+const push = ref<PushState>("off");
+const suggesting = ref(false);
+/** Mail, die per Benachrichtigung oder ?mail= geöffnet werden soll */
+const openUid = ref<number | null>(Number(new URLSearchParams(location.search).get("mail")) || null);
+
+async function togglePush() {
+  try {
+    push.value = push.value === "on" ? await disablePush() : await enablePush();
+    if (push.value === "on") await api.testPush();
+    loadStatus();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+
+async function suggestNow() {
+  suggesting.value = true;
+  try {
+    const r = await api.suggest();
+    runResult.value = { published: [], skipped: 0, dryRun: false, previews: [], message: r.message };
+    if (r.suggested) openUid.value = r.suggested.uid;
+    tab.value = "inbox";
+    refreshKey.value++;
+  } catch (e) {
+    error.value = (e as Error).message;
+  } finally {
+    suggesting.value = false;
+  }
+}
+
+function openFromUrl(url: string) {
+  const uid = Number(new URL(url, location.origin).searchParams.get("mail"));
+  if (!uid) return;
+  openUid.value = uid;
+  tab.value = "inbox";
+  refreshKey.value++;
+}
 
 async function loadStatus() {
   try {
@@ -47,6 +85,9 @@ const onChanged = loadStatus;
 let timer: ReturnType<typeof setInterval>;
 onMounted(() => {
   loadStatus();
+  pushState().then((s) => (push.value = s));
+  onOpenRequest(openFromUrl);
+  if (openUid.value) history.replaceState(null, "", "/");
   timer = setInterval(loadStatus, 60_000);
 });
 onUnmounted(() => clearInterval(timer));
@@ -68,12 +109,29 @@ onUnmounted(() => clearInterval(timer));
           </dd>
         </div>
         <div>
-          <dt class="text-zinc-500">Nächster Lauf</dt>
+          <dt class="text-zinc-500">Nächster Vorschlag</dt>
+          <dd class="font-medium tabular-nums">{{ formatDate(status.nextSuggestion) }}</dd>
+        </div>
+        <div v-if="status.config.autoPublish">
+          <dt class="text-zinc-500">Veröffentlichen</dt>
           <dd class="font-medium tabular-nums">{{ formatDate(status.nextRun) }}</dd>
         </div>
       </dl>
 
-      <div class="flex gap-1">
+      <div class="flex items-center gap-1">
+        <button
+          class="btn px-2"
+          :disabled="push === 'unsupported' || push === 'denied'"
+          :title="{ on: 'Chrome-Benachrichtigungen an – klicken zum Abschalten', off: 'Chrome-Benachrichtigungen einschalten', denied: 'Benachrichtigungen sind für diese Seite in Chrome blockiert', unsupported: 'Dieser Browser unterstützt keine Push-Benachrichtigungen' }[push]"
+          @click="togglePush"
+        >
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" :fill="push === 'on' ? 'currentColor' : 'none'" />
+            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+            <path v-if="push === 'denied'" d="m2 2 20 20" />
+          </svg>
+        </button>
+        <button class="btn" :disabled="suggesting || running" @click="suggestNow">{{ suggesting ? "Schreibt …" : "Vorschlag" }}</button>
         <button class="btn" :disabled="running" @click="run(true)">Testlauf</button>
         <button class="btn btn-primary" :disabled="running || !status || status.today >= status.limit" @click="run(false)">
           {{ running ? "Läuft …" : "Ausführen" }}
@@ -110,7 +168,7 @@ onUnmounted(() => clearInterval(timer));
         </article>
       </section>
 
-      <InboxView v-if="tab === 'inbox'" :key="'inbox' + refreshKey" :status="status" @changed="onChanged" />
+      <InboxView v-if="tab === 'inbox'" :key="'inbox' + refreshKey" :status="status" :open-uid="openUid" @changed="onChanged" @opened="openUid = null" />
       <LogList v-else-if="tab === 'log'" :key="'log' + refreshKey" />
       <section v-else-if="status" class="max-w-xl text-sm">
         <p class="mb-6 text-zinc-500">Werte aus der <code class="font-mono text-xs">.env</code> des Servers.</p>
@@ -118,7 +176,9 @@ onUnmounted(() => clearInterval(timer));
           <div v-for="[k, v] in ([
             ['WordPress', `${status.config.wpUrl} · ${status.config.wpStatus}`],
             ['IMAP-Ordner', status.config.folder],
-            ['Zeitplan', `${status.schedule} (${status.config.timezone})`],
+            ['Vorschläge', `${status.config.suggestSchedule} (${status.config.timezone})`],
+            ['Veröffentlichen', status.config.autoPublish ? `${status.schedule} (${status.config.timezone})` : 'aus (AUTO_PUBLISH=false)'],
+            ['Benachrichtigungen', `${status.pushSubscribers} Browser angemeldet`],
             ['Limit', `${status.config.perRun} pro Lauf, ${status.limit} pro Tag`],
             ['Sprachmodell', status.config.model],
             ['SEO-Plugin', status.config.seoPlugin],

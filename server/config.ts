@@ -13,6 +13,16 @@ function env(name: string, fallback?: string): string {
 const bool = (name: string, fallback: boolean) =>
   ["1", "true", "yes", "ja"].includes(env(name, String(fallback)).toLowerCase());
 
+function parseCategories(value: string): { categories: string[]; categorySlugs: Record<string, string> } {
+  const categorySlugs: Record<string, string> = {};
+  const categories = value.split(",").map((entry) => {
+    const [label, slug] = entry.split("=").map((s) => s.trim());
+    if (label && slug) categorySlugs[label] = slug;
+    return label ?? "";
+  }).filter(Boolean);
+  return { categories, categorySlugs };
+}
+
 export type SeoPlugin = "yoast" | "rankmath" | "none";
 export type LlmProvider = "ollama" | "claude";
 
@@ -36,7 +46,8 @@ export function loadConfig() {
       user: env("WP_USER"),
       appPassword: env("WP_APP_PASSWORD"),
       status: env("WP_STATUS", "publish") as "publish" | "draft" | "pending",
-      categories: env("WP_CATEGORIES", "News").split(",").map((c) => c.trim()).filter(Boolean),
+      // "News=music-news,Events=events": Anzeigename für das Modell = Slug der WordPress-Kategorie
+      ...parseCategories(env("WP_CATEGORIES", "News")),
       seoPlugin: env("SEO_PLUGIN", "none").toLowerCase() as SeoPlugin,
       featuredImage: bool("FEATURED_IMAGE", true),
     },
@@ -45,6 +56,9 @@ export function loadConfig() {
       perRun: Number(env("POSTS_PER_RUN", "1")),
       timezone: env("TIMEZONE", "Europe/Berlin"),
       schedule: env("SCHEDULE", "0 8,13,18 * * *"),
+      autoPublish: bool("AUTO_PUBLISH", true),
+      // 10 automatische Vorschläge pro Tag, grob alle 1,5 Stunden
+      suggestSchedule: env("SUGGEST_SCHEDULE", "0 8,9,11,12,14,15,17,18,20,21 * * *"),
     },
     llm: {
       provider,
@@ -53,12 +67,15 @@ export function loadConfig() {
       claudeModel: env("CLAUDE_MODEL", "claude-opus-5-5"),
       siteName: env("SITE_NAME", "Musikblog"),
       siteTone: env("SITE_TONE", "locker und kompetent"),
+      // Stil-Regelwerk der Redaktion (Markdown) – leer lassen, um keins zu verwenden
+      styleFile: env("STYLE_FILE", "stil/regelwerk.md"),
     },
     server: {
       host: env("HOST", "127.0.0.1"),
       port: Number(env("PORT", "3210")),
       password: env("DASHBOARD_PASSWORD", ""),
       dbPath: env("DB_PATH", "data/pressbot.sqlite"),
+      dataDir: env("DATA_DIR", "data"),
     },
   };
 

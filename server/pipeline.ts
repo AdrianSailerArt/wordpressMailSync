@@ -2,7 +2,8 @@
 
 import type { Config } from "./config.ts";
 import type { LogKind, Store } from "./db.ts";
-import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type PressMail } from "./mail.ts";
+import type { ImageInfo, MailImages } from "./images.ts";
+import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type ImageAttachment, type PressMail } from "./mail.ts";
 import { cleanArticle, type Article } from "./rewrite.ts";
 
 /** Schnittstellen statt Klassen, damit die Tests Fakes einsetzen können. */
@@ -15,11 +16,19 @@ export interface Deps {
   wordpress: {
     postsToday(): Promise<number>;
     slugExists(slug: string): Promise<boolean>;
-    createPost(article: Article, image?: PressMail["images"][number]): Promise<{ id: number; link: string }>;
+    createPost(article: Article, featured?: ImageAttachment, inline?: ImageAttachment[]): Promise<{ id: number; link: string }>;
   };
   rewriter: { rewrite(mail: PressMail): Promise<Article> };
+  images: {
+    collect(mail: PressMail): Promise<MailImages>;
+    read(mail: Pick<PressMail, "messageId">, id: string): Promise<(ImageInfo & { data: Buffer }) | null>;
+  };
+  notifier?: { notify(n: { title: string; body: string; url: string; tag: string }): Promise<void> };
   store: Store;
 }
+
+/** Höchstens so viele Mails prüft ein Vorschlags-Lauf, bevor er aufgibt (lokale Modelle sind langsam). */
+const MAX_SUGGEST_ATTEMPTS = 5;
 
 export interface MailSummary {
   uid: number;
@@ -32,6 +41,12 @@ export interface MailSummary {
   hasDraft: boolean;
 }
 
+export interface SuggestResult {
+  suggested: { uid: number; title: string } | null;
+  skipped: number;
+  message: string;
+}
+
 export interface RunResult {
   published: { title: string; link: string }[];
   skipped: number;
@@ -42,6 +57,8 @@ export interface RunResult {
 
 export class Pipeline {
   private queue: Promise<unknown> = Promise.resolve();
+  /** UID → Message-ID, damit Bildanfragen nicht jedes Mal das Postfach abfragen müssen */
+  private keys = new Map<number, string>();
   busy = false;
 
   constructor(private cfg: Config, private deps: Deps) {}
@@ -75,15 +92,21 @@ export class Pipeline {
     return { today: await this.deps.wordpress.postsToday(), limit: this.cfg.limits.daily };
   }
 
+  private async candidates(): Promise<PressMail[]> {
+    const mails = await this.deps.mailbox.candidates(this.deps.store.processedIds());
+    for (const m of mails) this.keys.set(m.uid, m.messageId);
+    return mails;
+  }
+
   async listMails(): Promise<MailSummary[]> {
     const drafts = this.deps.store.draftUids();
-    return (await this.deps.mailbox.candidates(this.deps.store.processedIds())).map((m) => ({
+    return (await this.candidates()).map((m) => ({
       uid: m.uid,
       subject: m.subject,
       sender: m.sender,
       date: m.date,
       snippet: m.body.slice(0, 280),
-      images: m.images.length,
+      images: m.images.length + (m.imageUrls?.length ?? 0),
       prefilter: looksRelevant(m),
       hasDraft: drafts.has(m.uid),
     }));
@@ -101,7 +124,32 @@ export class Pipeline {
   private async mustGet(uid: number): Promise<PressMail> {
     const mail = await this.deps.mailbox.get(uid);
     if (!mail) throw new Error(`Mail ${uid} nicht gefunden`);
+    this.keys.set(uid, mail.messageId);
     return mail;
+  }
+
+  /** Bilder einer Mail fürs Dashboard (beim ersten Mal werden verlinkte Bilder geladen). */
+  async images(uid: number): Promise<MailImages> {
+    return this.deps.images.collect(await this.mustGet(uid));
+  }
+
+  async image(uid: number, id: string): Promise<(ImageInfo & { data: Buffer }) | null> {
+    const messageId = this.keys.get(uid) ?? (await this.mustGet(uid)).messageId;
+    return this.deps.images.read({ messageId }, id);
+  }
+
+  /** Beitragsbild und Bilder im Text gemäß Auswahl im Entwurf (Standard: größtes Bild als Thumbnail). */
+  private async pickImages(mail: PressMail, article: Article): Promise<{ featured?: ImageAttachment; inline: ImageAttachment[] }> {
+    const { images } = await this.deps.images.collect(mail);
+    const auto = this.cfg.wp.featuredImage ? images[0]?.id : undefined;
+    const featuredId = article.featured_image === "none" ? undefined : article.featured_image || auto;
+    const load = async (id: string) => {
+      const img = await this.deps.images.read(mail, id);
+      return img ? { filename: img.filename, contentType: img.contentType, data: img.data } : undefined;
+    };
+    const featured = featuredId ? await load(featuredId) : undefined;
+    const inline = (await Promise.all(article.inline_images.map(load))).filter((i): i is ImageAttachment => !!i);
+    return { featured, inline };
   }
 
   /** Vollständige Original-Mail für die Vergleichsansicht im Dashboard. */
@@ -129,8 +177,8 @@ export class Pipeline {
   }
 
   private async publishMail(mail: PressMail, article: Article): Promise<{ id: number; link: string }> {
-    const image = this.cfg.wp.featuredImage ? mail.images[0] : undefined;
-    const post = await this.deps.wordpress.createPost(article, image);
+    const { featured, inline } = await this.pickImages(mail, article);
+    const post = await this.deps.wordpress.createPost(article, featured, inline);
     await this.markMail(mail, DONE_FLAG);
     this.log("published", article.title, mail.subject, post.link);
     return post;
@@ -149,6 +197,43 @@ export class Pipeline {
     });
   }
 
+  /**
+   * Automatischer Vorschlag: nächste Musik-Mail ohne Entwurf umschreiben, Bilder vorladen und
+   * per Push benachrichtigen. Veröffentlicht nichts.
+   */
+  suggest(): Promise<SuggestResult> {
+    return this.exclusive(async () => {
+      const result: SuggestResult = { suggested: null, skipped: 0, message: "" };
+      const drafts = this.deps.store.draftUids();
+      const open = (await this.candidates()).filter((m) => !drafts.has(m.uid) && looksRelevant(m));
+
+      for (const mail of open.slice(0, MAX_SUGGEST_ATTEMPTS)) {
+        const article = await this.draftFor(mail);
+        if (!article.relevant) {
+          result.skipped++;
+          await this.markMail(mail, SKIPPED_FLAG);
+          this.log("skipped", mail.subject, `nicht relevant: ${article.reason}`);
+          continue;
+        }
+        const { images } = await this.deps.images.collect(mail);
+        result.suggested = { uid: mail.uid, title: article.title };
+        this.log("suggested", article.title, `${mail.subject} · ${images.length} Bild${images.length === 1 ? "" : "er"}`);
+        await this.deps.notifier?.notify({
+          title: "Neuer Vorschlag",
+          body: article.title,
+          url: `/?mail=${mail.uid}`,
+          tag: `vorschlag-${mail.uid}`,
+        }).catch((err) => this.log("error", "", `Benachrichtigung fehlgeschlagen: ${err}`));
+        break;
+      }
+
+      result.message = result.suggested
+        ? `Vorschlag erstellt: ${result.suggested.title}`
+        : open.length ? `Kein passender Vorschlag unter ${Math.min(open.length, MAX_SUGGEST_ATTEMPTS)} Mails` : "Keine offenen Musik-Mails";
+      return result;
+    });
+  }
+
   /** Automatischer Lauf: höchstens POSTS_PER_RUN neue Beiträge, nie über DAILY_LIMIT. */
   run(dryRun = false): Promise<RunResult> {
     return this.exclusive(async () => {
@@ -161,7 +246,7 @@ export class Pipeline {
           return result;
         }
 
-        for (const mail of await this.deps.mailbox.candidates(this.deps.store.processedIds())) {
+        for (const mail of await this.candidates()) {
           if (result.published.length + result.previews.length >= remaining) break;
 
           if (!looksRelevant(mail)) {
