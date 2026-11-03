@@ -9,7 +9,8 @@
     "dev:server": "bun run --watch server/index.ts",
     "dev:web": "bunx --bun vite web",
     "build": "bunx --bun vite build web",
-    "start": "bun run server/index.ts",
+    "start": "bun run build && bun run serve",
+    "serve": "bun run server/index.ts",
     "once": "bun run server/cli.ts",
     "typecheck": "tsc --noEmit -p . && vue-tsc --noEmit -p web",
     "test": "bun test"

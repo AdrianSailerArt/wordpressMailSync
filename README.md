@@ -94,8 +94,7 @@ Dashboard-Tab geschlossen ist (Chrome muss laufen). Ein Klick öffnet direkt den
 ```bash
 bun install
 cp .env.example .env      # IMAP- und WordPress-Zugang eintragen
-bun run build             # Vue-Dashboard bauen
-bun run start             # Server + Zeitplan → http://127.0.0.1:3210
+bun run start             # Dashboard bauen + Server mit Zeitplan → http://127.0.0.1:3210
 ```
 
 Ohne Zugangsdaten ausprobieren (Beispiel-Mails, simuliertes WordPress): `DEMO=1 bun run start`
@@ -113,6 +112,7 @@ sh scripts/autostart-macos.sh --remove   # wieder entfernen
 
 | Befehl | Zweck |
 |---|---|
+| `bun run serve` | nur Server starten, ohne das Dashboard neu zu bauen |
 | `bun run once` / `bun run once --dry-run` | einmaliger Lauf ohne Dashboard |
 | `bun run dev` | Entwicklung mit Hot-Reload (Dashboard auf :5173) |
 | `bun test` · `bun run typecheck` | Tests und Typprüfung |
