@@ -6,7 +6,7 @@ import { fingerprint, groupDuplicates, isDuplicate } from "./duplicates.ts";
 import type { ImageInfo, MailImages, VideoInfo } from "./images.ts";
 import { originalMail, renderMailHtml, type OriginalMail } from "./mail-view.ts";
 import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type ImageAttachment, type MailboxStatus, type PressMail } from "./mail.ts";
-import { cleanArticle, type Article } from "./rewrite.ts";
+import { CancelledError, cleanArticle, type Article } from "./rewrite.ts";
 import type { WpCategory } from "./wordpress.ts";
 
 /** Schnittstellen statt Klassen, damit die Tests Fakes einsetzen können. */
@@ -26,7 +26,7 @@ export interface Deps {
       article: Article, featured?: ImageAttachment, inline?: ImageAttachment[], videos?: { video: VideoInfo; thumbnail: ImageAttachment | null }[],
     ): Promise<{ id: number; link: string }>;
   };
-  rewriter: { rewrite(mail: PressMail): Promise<Article> };
+  rewriter: { rewrite(mail: PressMail): Promise<Article>; cancel?(): boolean };
   images: {
     collect(mail: PressMail): Promise<MailImages>;
     read(mail: Pick<PressMail, "messageId">, id: string): Promise<(ImageInfo & { data: Buffer }) | null>;
@@ -86,6 +86,11 @@ export class Pipeline {
   busy = false;
 
   constructor(private cfg: Config, private deps: Deps) {}
+
+  /** Laufende Generierung abbrechen (Knopf im Dashboard); false, wenn gerade nichts geschrieben wird. */
+  cancel(): boolean {
+    return this.deps.rewriter.cancel?.() ?? false;
+  }
 
   /** Alle Aktionen nacheinander ausführen – Zeitplan und Dashboard dürfen sich nicht überholen. */
   private exclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -369,7 +374,9 @@ export class Pipeline {
         result.message = `${count} Beitrag/Beiträge ${dryRun ? "als Vorschau erzeugt" : "veröffentlicht"}, ${result.skipped} übersprungen`;
         return result;
       } catch (err) {
-        this.log("error", "", String(err));
+        // abgebrochen ist kein Fehler – die Mail bleibt unbearbeitet und kommt beim nächsten Lauf wieder
+        if (err instanceof CancelledError) result.message = "Lauf abgebrochen";
+        else this.log("error", "", String(err));
         throw err;
       } finally {
         if (!dryRun && result.message) this.log("run", "", result.message);

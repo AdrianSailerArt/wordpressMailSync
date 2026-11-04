@@ -8,13 +8,14 @@
 import { loadKalenderConfig } from "./config.ts";
 import { Store } from "./db.ts";
 import { Kalender } from "./kalender/sync.ts";
+import { defaultModel } from "./rewrite.ts";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const only = args.filter((a) => !a.startsWith("--"));
 const cfg = loadKalenderConfig();
 // gleicher Zwischenspeicher wie das Dashboard: unveränderte Seitenabschnitte liest das Modell nicht neu
-const kalender = new Kalender(cfg, () => cfg.llm.provider === "claude" ? cfg.llm.claudeModel : cfg.llm.ollamaModel, new Store(cfg.dbPath));
+const kalender = new Kalender(cfg, () => defaultModel(cfg.llm), new Store(cfg.dbPath));
 
 const result = await kalender.run({ dryRun, only, log: (line) => console.log(line) });
 

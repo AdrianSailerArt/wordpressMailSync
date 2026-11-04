@@ -57,7 +57,8 @@ function imapAccounts() {
 export type ImapAccount = ReturnType<typeof imapAccounts>[number];
 
 export type SeoPlugin = "yoast" | "rankmath" | "none";
-export type LlmProvider = "ollama" | "claude";
+export const LLM_PROVIDERS = ["ollama", "mlx", "claude"] as const;
+export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
 function llmConfig(provider: LlmProvider) {
   // den Key liest das Anthropic-SDK selbst, hier nur auf Vorhandensein prüfen
@@ -66,7 +67,12 @@ function llmConfig(provider: LlmProvider) {
     provider,
     ollamaUrl: env("OLLAMA_URL", "http://127.0.0.1:11434").replace(/\/+$/, ""),
     ollamaModel: env("OLLAMA_MODEL", "gemma4"),
+    // MLX auf Apple Silicon: `mlx_lm.server` mit OpenAI-kompatibler API
+    mlxUrl: env("MLX_URL", "http://127.0.0.1:8080").replace(/\/+$/, ""),
+    mlxModel: env("MLX_MODEL", "mlx-community/gemma-4-e4b-it-4bit"),
     claudeModel: env("CLAUDE_MODEL", "claude-opus-5-5"),
+    // Claude lässt sich im Dashboard nur mit API-Key wählen
+    claudeKey: !!process.env.ANTHROPIC_API_KEY?.trim(),
     siteName: env("SITE_NAME", "Musikblog"),
     siteTone: env("SITE_TONE", "locker und kompetent"),
     // Stil-Regelwerk der Redaktion (Markdown) – leer lassen, um keins zu verwenden

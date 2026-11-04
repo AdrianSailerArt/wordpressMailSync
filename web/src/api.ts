@@ -54,9 +54,17 @@ export interface LlmModel {
   tooBig: boolean;
 }
 
+export type LlmProvider = "ollama" | "mlx" | "claude";
+
 export interface ModelsResponse {
-  provider: "ollama" | "claude";
+  /** Anbieter, dessen Modelle gelistet sind */
+  provider: LlmProvider;
+  /** Anbieter, der gerade schreibt */
+  active: LlmProvider;
+  activeModel: string;
+  /** gewähltes Modell des gelisteten Anbieters */
   current: string;
+  providers: { id: LlmProvider; label: string; available: boolean }[];
   ramGB: number;
   models: LlmModel[];
   error?: string;
@@ -140,7 +148,7 @@ export interface Status {
     timezone: string;
     perRun: number;
     autoPublish: boolean;
-    provider: "ollama" | "claude";
+    provider: "ollama" | "mlx" | "claude";
     activeModel: string;
     suggestSchedule: string;
   };
@@ -277,9 +285,11 @@ export const api = {
   images: (uid: number) => call<MailImages>("GET", `/mails/${uid}/images`),
   imageUrl: (uid: number, id: string) => `/api/mails/${uid}/images/${id}`,
   testPush: () => call<{ ok: true }>("POST", "/push/test"),
-  models: () => call<ModelsResponse>("GET", "/llm/models"),
-  setModel: (model: string) => call<{ current: string }>("PUT", "/llm/model", { model }),
+  models: (provider?: LlmProvider) => call<ModelsResponse>("GET", `/llm/models${provider ? `?provider=${provider}` : ""}`),
+  setModel: (provider: LlmProvider, model: string) => call<{ provider: LlmProvider; current: string }>("PUT", "/llm/model", { provider, model }),
   wpCategories: () => call<WpCategories>("GET", "/wp/categories"),
+  /** laufenden Entwurf abbrechen (z. B. wenn das Modell ins Leere läuft) */
+  cancelLlm: () => call<{ cancelled: boolean }>("POST", "/llm/cancel"),
   trace: (uid: number) => call<LlmTrace | null>("GET", `/mails/${uid}/trace`),
   kalender: () => call<KalenderState>("GET", "/kalender"),
   kalenderRun: (dryRun: boolean, only: string[] = []) =>

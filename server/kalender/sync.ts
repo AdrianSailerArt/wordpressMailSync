@@ -89,6 +89,8 @@ export class Kalender {
    * damit beim nächsten Mal neu gefragt wird.
    */
   private askCached(model: string, today: string, abort: AbortSignal, stats: AskStats): AskJson {
+    // Anbieter zusammen mit dem Modell festhalten – er lässt sich im Dashboard umschalten
+    const llm = { ...this.cfg.llm };
     return async (system, user, schema) => {
       const key = createHash("sha256").update(`${model}\n${system.replaceAll(today, today.slice(0, 7))}\n${user}`).digest("hex");
       const hit = this.cache?.getCached(key);
@@ -97,7 +99,7 @@ export class Kalender {
         stats.cached++;
         return JSON.parse(hit);
       }
-      const raw = await generateJson(this.cfg.llm, model, system, user, schema, abort);
+      const raw = await generateJson(llm, model, system, user, schema, abort);
       stats.asked++;
       if ((raw as { events?: unknown[] }).events?.length) this.cache?.setCached(key, JSON.stringify(raw));
       return raw;

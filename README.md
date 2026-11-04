@@ -203,16 +203,23 @@ Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen
 
 ## Modell wechseln und zuschauen
 
-- **Einstellungen → Sprachmodell** listet alle in Ollama installierten Modelle (Größe,
-  Quantisierung, ob gerade geladen, Warnung bei zu wenig Arbeitsspeicher). Ein Klick schaltet
-  um, die Wahl gilt ab dem nächsten Entwurf und bleibt gespeichert. `OLLAMA_MODEL` ist nur
-  der Standard.
+- **Einstellungen → Sprachmodell**: oben den Anbieter wählen (**Ollama**, **MLX** oder
+  **Claude**), darunter erscheinen seine Modelle (bei Ollama mit Größe, Quantisierung, ob gerade
+  geladen, Warnung bei zu wenig Arbeitsspeicher). Ein Klick auf ein Modell schaltet Anbieter und
+  Modell um – für Postfach und Konzertkalender, ab dem nächsten Entwurf bzw. Abruf, und bleibt
+  gespeichert. `LLM_PROVIDER`, `OLLAMA_MODEL` und `MLX_MODEL` sind nur die Standards.
 - Während ein Entwurf entsteht, zeigt das Dashboard **live**, was das Modell schreibt (Stufe,
   Zeichen, Zeit) – auch bei Läufen aus dem Zeitplan. In der Kopfzeile steht dann „schreibt …“.
+- **Abbrechen** (in der Live-Ausgabe und neben „Wird geschrieben …“) stoppt den Entwurf sofort;
+  die Mail bleibt unbearbeitet. Läuft das Modell von selbst ins Leere (nur noch Leerzeichen oder
+  dieselbe Stelle in Dauerschleife), bricht die App automatisch ab und fragt einmal neu.
 - Reiter **KI** im Editor: das Protokoll beider Stufen mit Anweisung, Eingabe, Rohantwort,
   Dauer, Tokens und Geschwindigkeit. Jeder Entwurf merkt sich, welches Modell ihn geschrieben hat.
 - Erfahrung: `gemma3:4b` ist nicht schneller fertig als `gemma4` und schreibt teils auf Englisch.
-- Claude statt lokal: `LLM_PROVIDER=claude` und `ANTHROPIC_API_KEY` setzen.
+- MLX (Apple Silicon): `mlx_lm.server --port 8080` starten, dann im Dashboard „MLX“ wählen
+  (Adresse über `MLX_URL`). Gelistet werden die heruntergeladenen MLX-Modelle. MLX erzwingt kein JSON-Schema – das Schema steht in
+  der Anweisung, ungültige Antworten werden einmal neu angefragt.
+- Claude: `ANTHROPIC_API_KEY` in der `.env` setzen, dann ist „Claude“ im Dashboard wählbar.
 
 ## Stil-Regelwerk
 

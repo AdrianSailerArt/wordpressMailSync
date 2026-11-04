@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { api } from "../api";
 import { stageLabel, type LiveRun } from "../llm";
+import Icon from "./Icon.vue";
 
 /** Zeigt live, was das Sprachmodell gerade schreibt. */
 const props = defineProps<{ run: LiveRun }>();
@@ -8,6 +10,13 @@ const props = defineProps<{ run: LiveRun }>();
 const now = ref(Date.now());
 const timer = setInterval(() => (now.value = Date.now()), 250);
 onUnmounted(() => clearInterval(timer));
+
+const cancelling = ref(false);
+async function cancel() {
+  cancelling.value = true;
+  // der Knopf bleibt gesperrt, bis der Lauf endet und die Anzeige verschwindet
+  await api.cancelLlm().catch(() => (cancelling.value = false));
+}
 
 const seconds = (from: number) => Math.max(0, Math.round((now.value - from) / 1000));
 const box = ref<HTMLElement | null>(null);
@@ -44,6 +53,14 @@ const check = computed(() => {
       <span class="font-medium">{{ run.model }}</span>
       <span class="text-zinc-400">Stufe {{ run.stage === "check" ? 1 : 2 }}/2 · {{ stageLabel(run.stage) }}</span>
       <span class="ml-auto tabular-nums text-zinc-400">{{ run.text.length }} Zeichen · {{ seconds(run.stageStartedAt) }} s (gesamt {{ seconds(run.startedAt) }} s)</span>
+      <button
+        class="inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium text-red-300 ring-1 ring-red-400/30 transition hover:bg-red-500/15 disabled:opacity-50"
+        :disabled="cancelling"
+        title="Generierung stoppen – die Mail bleibt unbearbeitet"
+        @click="cancel"
+      >
+        <Icon name="stop" :size="12" />{{ cancelling ? "bricht ab …" : "Abbrechen" }}
+      </button>
     </div>
 
     <p v-if="check && run.stage === 'write'" class="border-b border-white/10 px-4 py-2 text-xs text-zinc-400">

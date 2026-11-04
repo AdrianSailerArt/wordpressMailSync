@@ -3,11 +3,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LlmEvents, type LlmEvent, type LlmTrace } from "../server/llm-events.ts";
-import { Rewriter } from "../server/rewrite.ts";
+import type { LlmProvider } from "../server/config.ts";
+import { CancelledError, extractJson, generateJson, isLooping, Rewriter } from "../server/rewrite.ts";
 
 const cfg = {
-  provider: "ollama" as const, ollamaUrl: "http://ollama.test", ollamaModel: "gemma4",
-  claudeModel: "", siteName: "Blog", siteTone: "locker", styleFile: "",
+  provider: "ollama" as LlmProvider, ollamaUrl: "http://ollama.test", ollamaModel: "gemma4",
+  mlxUrl: "http://mlx.test", mlxModel: "mlx-community/gemma-4-e4b-it-4bit", claudeModel: "", claudeKey: false, siteName: "Blog", siteTone: "locker", styleFile: "",
 };
 const mail = { uid: 1, messageId: "<1@test>", subject: "Band – Tour 2027", sender: "x", date: "", body: "Tourdaten …", images: [] };
 const reply = (content: string) => new Response(JSON.stringify({ message: { content } }));
@@ -127,4 +128,102 @@ test("Fehler im Lauf: Protokoll enthält den Fehler, Live-Anzeige wird beendet",
   await Bun.sleep(10);
   expect(trace!.stages[1]!.error).toContain("Ollama: 500");
   expect(events.active()).toEqual([]);
+});
+
+/** Antwort von mlx_lm.server als Server-Sent Events (OpenAI-Format) */
+const mlxStream = (content: string) => {
+  const parts = content.match(/.{1,7}/gs) ?? [];
+  const lines = parts.map((p) => `data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}`);
+  lines.push(`data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 90, completion_tokens: 30 } })}`, "data: [DONE]");
+  return new Response(lines.join("\n\n") + "\n\n");
+};
+const mlx = { ...cfg, provider: "mlx" as LlmProvider };
+
+test("MLX: OpenAI-Schnittstelle, Schema in der Anweisung, Markdown-Zaun wird entfernt", async () => {
+  const spy = spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(mlxStream("```json\n" + music + "\n```"))
+    .mockResolvedValueOnce(mlxStream(`Hier der Beitrag:\n${article}`));
+  let trace: LlmTrace | null = null;
+  const rw = new Rewriter(mlx, ["News"], { events: new LlmEvents(), onTrace: (t) => (trace = t) });
+  expect(rw.model).toBe("mlx-community/gemma-4-e4b-it-4bit");
+  const result = await rw.rewrite(mail);
+
+  expect(String(spy.mock.calls[0]![0])).toBe("http://mlx.test/v1/chat/completions");
+  const req = body(spy, 1);
+  expect(req.model).toBe("mlx-community/gemma-4-e4b-it-4bit");
+  expect(req.stream).toBe(true);
+  expect(req.max_tokens).toBeGreaterThan(512);
+  expect(req.messages[0].content).toContain('"content_html"'); // Schema steht in der Anweisung
+  expect(result.relevant).toBe(true);
+  expect(result.title).toBe("Band Tour 2027");
+  expect(trace!.stages[1]!.stats).toMatchObject({ promptTokens: 90, outputTokens: 30 });
+});
+
+test("MLX: kaputtes JSON beim Herauslesen wird einmal neu angefragt", async () => {
+  const spy = spyOn(globalThis, "fetch").mockResolvedValueOnce(mlxStream("{ kaputt")).mockResolvedValueOnce(mlxStream('{"events":[]}'));
+  expect(await generateJson(mlx, "m", "sys", "text", { type: "object" })).toEqual({ events: [] });
+  expect(spy).toHaveBeenCalledTimes(2);
+  expect(body(spy, 0).temperature).toBe(0);
+});
+
+test("MLX nicht erreichbar: verständliche Fehlermeldung", async () => {
+  spyOn(globalThis, "fetch").mockRejectedValueOnce(new TypeError("fetch failed"));
+  expect(generateJson(mlx, "m", "sys", "text", {})).rejects.toThrow("läuft mlx_lm.server?");
+});
+
+test("extractJson: Text und Zäune um das Objekt herum fallen weg", () => {
+  expect(extractJson('```json\n{"a":1}\n```')).toBe('{"a":1}');
+  expect(extractJson('Antwort: {"a":{"b":2}} Fertig.')).toBe('{"a":{"b":2}}');
+  expect(extractJson("kein json")).toBe("kein json");
+});
+
+/** Ollama-Antwort, die nach dem ersten Stück hängen bleibt, bis der Aufruf abgebrochen wird */
+const hanging = (signal: AbortSignal) => new Response(new ReadableStream({
+  start(ctrl) {
+    ctrl.enqueue(new TextEncoder().encode(JSON.stringify({ message: { content: "{\"rel" }, done: false }) + "\n"));
+    signal.addEventListener("abort", () => ctrl.error(signal.reason));
+  },
+}));
+
+test("Abbrechen stoppt die laufende Generierung", async () => {
+  spyOn(globalThis, "fetch").mockResolvedValueOnce(reply(music))
+    .mockImplementationOnce(((_: unknown, init: RequestInit) => Promise.resolve(hanging(init.signal!))) as unknown as typeof fetch);
+  const events = new LlmEvents();
+  let trace: LlmTrace | null = null;
+  const rw = new Rewriter(cfg, ["News"], { events, onTrace: (t) => (trace = t) });
+  expect(rw.cancel()).toBe(false); // nichts läuft
+  const running = rw.rewrite(mail);
+  await Bun.sleep(20);
+  expect(rw.cancel()).toBe(true);
+  expect(running).rejects.toBeInstanceOf(CancelledError);
+  await Bun.sleep(10);
+  expect(trace!.reason).toBe("Abgebrochen");
+  expect(trace!.stages[1]!.error).toBe("abgebrochen");
+  expect(events.active()).toEqual([]);
+  expect(rw.cancel()).toBe(false);
+});
+
+test("läuft das Modell ins Leere, wird abgebrochen und einmal neu gefragt", async () => {
+  const blank = (signal: AbortSignal) => new Response(new ReadableStream({
+    start(ctrl) {
+      // nur noch Zeilenumbrüche – typisches Festlaufen im JSON-Modus
+      for (let i = 0; i < 100; i++) ctrl.enqueue(new TextEncoder().encode(JSON.stringify({ message: { content: "{ " + "\n".repeat(i ? 20 : 0) }, done: false }) + "\n"));
+      signal.addEventListener("abort", () => ctrl.error(signal.reason));
+    },
+  }));
+  const spy = spyOn(globalThis, "fetch").mockResolvedValueOnce(reply(music))
+    .mockImplementationOnce(((_: unknown, init: RequestInit) => Promise.resolve(blank(init.signal!))) as unknown as typeof fetch)
+    .mockResolvedValueOnce(reply(article));
+  const result = await new Rewriter(cfg, ["News"]).rewrite(mail);
+  expect(spy).toHaveBeenCalledTimes(3);
+  expect(result.title).toBe("Band Tour 2027");
+});
+
+test("isLooping: Leerlauf und Dauerschleifen, normaler Text nicht", () => {
+  const prose = "Die Band kommt 2027 auf Tour und spielt in Freiburg, Basel und Karlsruhe. ";
+  expect(isLooping("{" + " \n".repeat(400))).toBe(true);
+  expect(isLooping('{"tags": ["Tour", ' + '"Tour 2027", '.repeat(80))).toBe(true);
+  expect(isLooping(prose.repeat(12))).toBe(true); // derselbe Satz immer wieder
+  expect(isLooping(Array.from({ length: 30 }, (_, i) => `Termin ${i + 1}: ${10 + i}.03.2027 – Stadt ${i}`).join("\n"))).toBe(false);
+  expect(isLooping("kurz")).toBe(false);
 });

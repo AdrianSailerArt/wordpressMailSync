@@ -303,7 +303,8 @@ async function generateOllama(
       stream: true,
       think: false,
       keep_alive: "10m",
-      options: { temperature, num_ctx: 16384 },
+      // Obergrenze, falls sich das Modell festläuft (ein Beitrag braucht ~2000 Tokens)
+      options: { temperature, num_ctx: 16384, num_predict: 8192 },
     }),
     signal: abort ? AbortSignal.any([abort, AbortSignal.timeout(10 * 60_000)]) : AbortSignal.timeout(10 * 60_000),
   }).catch((err) => {
@@ -350,6 +351,91 @@ async function generateOllama(
   };
 }
 
+/** Antwort auf das JSON-Objekt beschneiden – MLX-Modelle setzen gern ```json-Zäune oder einen Satz davor. */
+export function extractJson(text: string): string {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  return start === -1 || end < start ? text.trim() : text.slice(start, end + 1);
+}
+
+/**
+ * MLX (`mlx_lm.server`, OpenAI-kompatibel). Der Server kennt kein JSON-Schema, deshalb steht es in der
+ * Anweisung; Fehlerhaftes fängt die Prüfung danach ab (und fragt einmal neu).
+ */
+async function generateMlx(
+  cfg: Config["llm"], model: string, system: string, user: string, schema: object, onToken: (t: string) => void, temperature = 0.4,
+  abort?: AbortSignal,
+): Promise<Generated> {
+  const started = Date.now();
+  const instruction = `${system}\n\nAntworte ausschließlich mit einem einzigen JSON-Objekt nach diesem JSON-Schema, ohne Text davor oder danach und ohne Markdown:\n${JSON.stringify(schema)}`;
+  const res = await fetch(`${cfg.mlxUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: instruction }, { role: "user", content: user }],
+      stream: true,
+      stream_options: { include_usage: true },
+      temperature,
+      max_tokens: 8192, // Standard des Servers (512) reicht für keinen Beitrag
+      chat_template_kwargs: { enable_thinking: false },
+    }),
+    signal: abort ? AbortSignal.any([abort, AbortSignal.timeout(10 * 60_000)]) : AbortSignal.timeout(10 * 60_000),
+  }).catch((err) => {
+    if (abort?.aborted) throw err;
+    throw new Error(`MLX nicht erreichbar unter ${cfg.mlxUrl} – läuft mlx_lm.server? (${err})`);
+  });
+  if (!res.ok) throw new Error(`MLX: ${res.status} ${(await res.text()).slice(0, 300)}`);
+  if (!res.body) throw new Error("Leere Antwort von MLX");
+
+  // Server-Sent Events: „data: {…}“ je Textstück, am Ende die Token-Zahlen und „data: [DONE]“
+  let raw = "";
+  let buffer = "";
+  let usage: { prompt_tokens?: number; completion_tokens?: number } = {};
+  let firstToken = 0;
+  const handleLine = (line: string) => {
+    if (!line.startsWith("data:")) return;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") return;
+    const msg = JSON.parse(data) as { choices?: { delta?: { content?: string } }[]; usage?: typeof usage; error?: unknown };
+    if (msg.error) throw new Error(`MLX: ${JSON.stringify(msg.error)}`);
+    const text = msg.choices?.[0]?.delta?.content ?? "";
+    if (text) {
+      firstToken ||= Date.now();
+      raw += text;
+      onToken(text);
+    }
+    if (msg.usage) usage = msg.usage;
+  };
+  const decoder = new TextDecoder();
+  for await (const chunk of res.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) !== -1) {
+      handleLine(buffer.slice(0, nl));
+      buffer = buffer.slice(nl + 1);
+    }
+  }
+  handleLine(buffer + decoder.decode());
+  if (!raw) throw new Error("Leere Antwort von MLX");
+  const genMs = firstToken ? Date.now() - firstToken : 0;
+  return {
+    raw: extractJson(raw),
+    stats: {
+      ms: Date.now() - started,
+      promptTokens: usage.prompt_tokens,
+      outputTokens: usage.completion_tokens,
+      tokensPerSec: usage.completion_tokens && genMs ? Math.round((usage.completion_tokens / genMs) * 1e4) / 10 : undefined,
+    },
+  };
+}
+
+/** Lokales Modell (Ollama oder MLX) mit Live-Ausgabe */
+const generateLocal = (
+  cfg: Config["llm"], model: string, system: string, user: string, schema: object, onToken: (t: string) => void, temperature?: number,
+  abort?: AbortSignal,
+) => (cfg.provider === "mlx" ? generateMlx : generateOllama)(cfg, model, system, user, schema, onToken, temperature, abort);
+
 async function generateClaude(cfg: Config["llm"], system: string, user: string, schema: object, abort?: AbortSignal): Promise<Generated> {
   const started = Date.now();
   const client = new Anthropic();
@@ -378,17 +464,57 @@ async function generateClaude(cfg: Config["llm"], system: string, user: string, 
 export async function generateJson(
   cfg: Config["llm"], model: string, system: string, user: string, schema: object, abort?: AbortSignal,
 ): Promise<unknown> {
-  const { raw } = cfg.provider === "claude"
-    ? await generateClaude(cfg, system, user, schema, abort)
-    : await generateOllama(cfg, model, system, user, schema, () => {}, 0, abort);
-  if (raw === null) throw new Error("Das Modell hat die Anfrage abgelehnt");
-  return JSON.parse(raw);
+  // MLX hält sich nicht immer an das Format – dann einmal neu fragen
+  for (let attempt = 0; ; attempt++) {
+    const { raw } = cfg.provider === "claude"
+      ? await generateClaude(cfg, system, user, schema, abort)
+      : await generateLocal(cfg, model, system, user, schema, () => {}, 0, abort);
+    if (raw === null) throw new Error("Das Modell hat die Anfrage abgelehnt");
+    try {
+      return JSON.parse(raw);
+    } catch (err) {
+      if (cfg.provider !== "mlx" || attempt > 0) throw err;
+    }
+  }
 }
+
+/** Modell laut Konfiguration (ohne Auswahl im Dashboard) */
+export const defaultModel = (cfg: Config["llm"]) =>
+  cfg.provider === "claude" ? cfg.claudeModel : cfg.provider === "mlx" ? cfg.mlxModel : cfg.ollamaModel;
 
 /** Stil-Regelwerk der Redaktion (Markdown), wird an die Schreib-Anweisung angehängt. */
 export function loadStyleGuide(path: string): string {
   if (!path || !existsSync(path)) return "";
   return `\n\n# Stil-Regelwerk der Redaktion – verbindlich\n\n${readFileSync(path, "utf8").trim()}\n`;
+}
+
+/** Abbruch über den Knopf im Dashboard */
+export class CancelledError extends Error {
+  constructor() {
+    super("Generierung abgebrochen");
+    this.name = "CancelledError";
+  }
+}
+
+/**
+ * Läuft das Modell ins Leere? Der Schluss der Ausgabe besteht nur noch aus Leerzeichen/Zeilenumbrüchen
+ * oder aus demselben kurzen Stück in Dauerschleife („, , , ,“ oder ein wiederholter Satz).
+ */
+export function isLooping(text: string, window = 600): boolean {
+  if (text.length < window) return false;
+  const tail = text.slice(-window);
+  if (!tail.trim()) return true;
+  for (let period = 1; period <= 150; period++) {
+    let repeats = true;
+    for (let i = 0; i + period < tail.length; i++) {
+      if (tail[i] !== tail[i + period]) {
+        repeats = false;
+        break;
+      }
+    }
+    if (repeats) return true;
+  }
+  return false;
 }
 
 export interface RewriterOptions {
@@ -401,6 +527,8 @@ export interface RewriterOptions {
 
 export class Rewriter {
   private system: string;
+  /** laufende Generierung – für den Abbrechen-Knopf */
+  private running?: AbortController;
 
   constructor(private cfg: Config["llm"], private categories: string[], private opts: RewriterOptions = {}) {
     this.system = SYSTEM_PROMPT.replace("{siteName}", cfg.siteName)
@@ -409,12 +537,23 @@ export class Rewriter {
   }
 
   get model(): string {
-    return this.cfg.provider === "claude" ? this.cfg.claudeModel : this.opts.model?.() || this.cfg.ollamaModel;
+    return this.cfg.provider === "claude" ? this.cfg.claudeModel : this.opts.model?.() || defaultModel(this.cfg);
   }
 
-  /** JSON vom Modell holen; lokale Modelle liefern gelegentlich Unbrauchbares – dann einmal neu versuchen. */
+  /** Laufende Generierung abbrechen; false, wenn gerade nichts läuft. */
+  cancel(): boolean {
+    if (!this.running || this.running.signal.aborted) return false;
+    this.running.abort();
+    return true;
+  }
+
+  /**
+   * JSON vom Modell holen; lokale Modelle liefern gelegentlich Unbrauchbares oder laufen sich fest –
+   * dann einmal neu versuchen.
+   */
   private async ask<T>(
-    uid: number, stage: LlmStage, model: string, system: string, user: string, schema: object, parse: (raw: unknown) => T,
+    uid: number, stage: LlmStage, llm: Config["llm"], model: string, system: string, user: string, schema: object, parse: (raw: unknown) => T,
+    abort: AbortSignal,
   ): Promise<T | null> {
     const events = this.opts.events;
     let lastError: unknown;
@@ -422,50 +561,67 @@ export class Rewriter {
       events?.emit({ type: "start", uid, stage, model, system, user, at: new Date().toISOString() });
       const started = Date.now();
       let streamed = "";
+      let checked = 0;
+      const stuck = new AbortController();
+      const signal = AbortSignal.any([abort, stuck.signal]);
       try {
-        const { raw, stats } = this.cfg.provider === "claude"
-          ? await generateClaude(this.cfg, system, user, schema)
-          : await generateOllama(this.cfg, model, system, user, schema, (text) => {
+        const { raw, stats } = llm.provider === "claude"
+          ? await generateClaude(llm, system, user, schema, signal)
+          : await generateLocal(llm, model, system, user, schema, (text) => {
               streamed += text;
               events?.emit({ type: "token", uid, stage, text });
-            });
+              // alle ~200 Zeichen prüfen, ob die Ausgabe nur noch Leerlauf ist
+              if (streamed.length - checked >= 200) {
+                checked = streamed.length;
+                if (isLooping(streamed)) stuck.abort();
+              }
+            }, undefined, signal);
         events?.emit({ type: "end", uid, stage, raw: raw ?? "(abgelehnt)", stats });
         return raw === null ? null : parse(JSON.parse(raw));
       } catch (err) {
-        lastError = err;
-        events?.emit({ type: "end", uid, stage, raw: streamed, stats: { ms: Date.now() - started }, error: String(err) });
-        if (!(err instanceof SyntaxError || err instanceof z.ZodError)) throw err;
+        if (abort.aborted) {
+          events?.emit({ type: "end", uid, stage, raw: streamed, stats: { ms: Date.now() - started }, error: "abgebrochen" });
+          throw new CancelledError();
+        }
+        lastError = stuck.signal.aborted ? new Error("Das Modell ist ins Leere gelaufen (Wiederholung/Leerzeichen)") : err;
+        events?.emit({ type: "end", uid, stage, raw: streamed, stats: { ms: Date.now() - started }, error: String(lastError) });
+        if (!(stuck.signal.aborted || err instanceof SyntaxError || err instanceof z.ZodError)) throw err;
       }
     }
     throw new Error(`Ungültige Antwort vom Sprachmodell: ${lastError}`);
   }
 
   async rewrite(mail: PressMail): Promise<Article> {
-    const model = this.model; // während eines Durchlaufs nicht wechseln
+    // Anbieter und Modell während eines Durchlaufs nicht wechseln (im Dashboard umschaltbar)
+    const llm = { ...this.cfg };
+    const model = this.model;
+    const run = new AbortController();
+    this.running = run;
     const user =
       `Betreff: ${mail.subject}\nVon: ${mail.sender}\nDatum: ${mail.date}\n` +
       `Anhänge mit Bildern: ${mail.images.length}\n\n<email>\n${stripBlockedUrls(mail.body)}\n</email>`;
     let result: Article = ArticleSchema.parse({ relevant: false, reason: "Abgebrochen", generated_by: model });
     try {
       // Stufe 1: Ist das überhaupt Musik? (Anfang der Mail reicht und ist schnell)
-      const check = await this.ask(mail.uid, "check", model, CLASSIFY_PROMPT, user.slice(0, 6000), CLASSIFY_SCHEMA, (r) =>
-        z.object({ artist: z.string(), music_news: z.boolean(), reason: z.string() }).parse(r));
+      const check = await this.ask(mail.uid, "check", llm, model, CLASSIFY_PROMPT, user.slice(0, 6000), CLASSIFY_SCHEMA, (r) =>
+        z.object({ artist: z.string(), music_news: z.boolean(), reason: z.string() }).parse(r), run.signal);
       if (check === null) {
         result = ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt", generated_by: model });
       } else if (!check.music_news || !check.artist.trim()) {
         result = ArticleSchema.parse({ relevant: false, reason: `Keine Musik-News: ${check.reason}`, generated_by: model });
       } else {
         // Stufe 2: Beitrag schreiben
-        const article = await this.ask(mail.uid, "write", model, this.system, user, JSON_SCHEMA, (r) => ArticleSchema.parse(r));
+        const article = await this.ask(mail.uid, "write", llm, model, this.system, user, JSON_SCHEMA, (r) => ArticleSchema.parse(r), run.signal);
         result = article === null
           ? ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt", generated_by: model })
           : { ...cleanArticle({ ...article, content_html: keepMailLinks(article.content_html, mail) }, this.categories), generated_by: model };
       }
       return result;
     } catch (err) {
-      result = { ...result, reason: `Fehler: ${err instanceof Error ? err.message : String(err)}` };
+      result = { ...result, reason: err instanceof CancelledError ? "Abgebrochen" : `Fehler: ${err instanceof Error ? err.message : String(err)}` };
       throw err;
     } finally {
+      if (this.running === run) this.running = undefined;
       this.opts.events?.emit({ type: "result", uid: mail.uid, relevant: result.relevant, reason: result.reason, model }, this.opts.onTrace);
     }
   }

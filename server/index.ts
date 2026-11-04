@@ -6,11 +6,11 @@ import { basicAuth } from "hono/basic-auth";
 import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { totalmem } from "node:os";
-import { createApp } from "./app.ts";
-import { loadKalenderConfig } from "./config.ts";
+import { createApp, modelSetting } from "./app.ts";
+import { LLM_PROVIDERS, loadKalenderConfig, type LlmProvider } from "./config.ts";
 import { Kalender, type Auswahl, type KalenderResult } from "./kalender/sync.ts";
 import { mailCsp } from "./mail-view.ts";
-import { ArticleSchema } from "./rewrite.ts";
+import { ArticleSchema, defaultModel } from "./rewrite.ts";
 
 const { cfg, store, push, events, rewriter, pipeline } = createApp();
 
@@ -38,7 +38,8 @@ const suggestJob = new Cron(cfg.limits.suggestSchedule, { timezone: cfg.limits.t
 });
 
 /** Konzertkalender (täglich, wenn KALENDER_AUTO=true) – Veranstalter-Seiten, Vaddi, Ticketmaster → WordPress-Plugin. */
-const kalenderCfg = loadKalenderConfig();
+// dieselbe Sprachmodell-Einstellung wie das Postfach, damit die Wahl im Dashboard für beide gilt
+const kalenderCfg = { ...loadKalenderConfig(), llm: cfg.llm };
 const kalender = new Kalender(kalenderCfg, () => rewriter.model, store);
 const lastKalender = (): KalenderResult | null => JSON.parse(store.getSetting("kalender_last") ?? "null");
 /** `selected`: Anzahl einzeln übertragener Termine, `sources`: einzeln übertragene Quellen */
@@ -98,6 +99,62 @@ app.onError((err, c) => {
 
 const uid = (c: { req: { param(k: "uid"): string } }) => Number(c.req.param("uid"));
 
+const PROVIDER_LABEL: Record<LlmProvider, string> = { ollama: "Ollama", mlx: "MLX", claude: "Claude" };
+
+/** Gewähltes Modell eines Anbieters (auch wenn er gerade nicht aktiv ist) */
+const modelFor = (provider: LlmProvider) =>
+  provider === "claude" ? cfg.llm.claudeModel : store.getSetting(modelSetting(provider)) || defaultModel({ ...cfg.llm, provider });
+
+interface LlmModel {
+  name: string; sizeGB: number; params: string; quantization: string; family: string; loaded: boolean; tooBig: boolean;
+}
+
+/** Installierte Modelle eines Anbieters; zu große (mehr als ~70 % des Arbeitsspeichers) werden markiert */
+async function listModels(provider: LlmProvider): Promise<{ models: LlmModel[]; error?: string }> {
+  const ramGB = totalmem() / 1e9;
+  if (provider === "claude") {
+    return cfg.llm.claudeKey
+      ? { models: [{ name: cfg.llm.claudeModel, sizeGB: 0, params: "", quantization: "", family: "Claude-API", loaded: false, tooBig: false }] }
+      : { models: [], error: "Für Claude fehlt ANTHROPIC_API_KEY in der .env" };
+  }
+  if (provider === "mlx") {
+    try {
+      // mlx_lm.server nennt alle heruntergeladenen Hugging-Face-Modelle
+      const res = await fetch(`${cfg.llm.mlxUrl}/v1/models`, { signal: AbortSignal.timeout(5000) });
+      const ids = ((await res.json()) as { data: { id: string }[] }).data.map((m) => m.id).sort();
+      return {
+        models: ids.map((name) => ({
+          name, sizeGB: 0, params: name.match(/(\d+(?:\.\d+)?b)\b/i)?.[1]?.toUpperCase() ?? "",
+          quantization: name.match(/(\d+)-?bit/i)?.[0] ?? "", family: "", loaded: false, tooBig: false,
+        })),
+      };
+    } catch {
+      return { models: [], error: `MLX nicht erreichbar unter ${cfg.llm.mlxUrl} – läuft mlx_lm.server?` };
+    }
+  }
+  try {
+    type Tag = { name: string; size: number; details?: { parameter_size?: string; quantization_level?: string; family?: string } };
+    const [tags, ps] = await Promise.all([
+      fetch(`${cfg.llm.ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json() as Promise<{ models: Tag[] }>),
+      fetch(`${cfg.llm.ollamaUrl}/api/ps`, { signal: AbortSignal.timeout(5000) }).then((r) => r.json() as Promise<{ models: { name: string }[] }>),
+    ]);
+    const loaded = new Set(ps.models.map((m) => m.name));
+    return {
+      models: tags.models.map((m) => ({
+        name: m.name.replace(/:latest$/, ""),
+        sizeGB: Math.round(m.size / 1e8) / 10,
+        params: m.details?.parameter_size ?? "",
+        quantization: m.details?.quantization_level ?? "",
+        family: m.details?.family ?? "",
+        loaded: loaded.has(m.name),
+        tooBig: m.size / 1e9 > ramGB * 0.7,
+      })),
+    };
+  } catch {
+    return { models: [], error: `Ollama nicht erreichbar unter ${cfg.llm.ollamaUrl} – läuft die Ollama-App?` };
+  }
+}
+
 const api = new Hono()
   .get("/status", async (c) => {
     const { today, limit } = await pipeline.remainingToday();
@@ -113,7 +170,7 @@ const api = new Hono()
         site: cfg.llm.siteName,
         wpUrl: cfg.wp.url,
         wpStatus: cfg.wp.status,
-        model: cfg.llm.provider === "claude" ? `Claude (${rewriter.model})` : `lokal: ${rewriter.model} (Ollama)`,
+        model: cfg.llm.provider === "claude" ? `Claude (${rewriter.model})` : `lokal: ${rewriter.model} (${cfg.llm.provider === "mlx" ? "MLX" : "Ollama"})`,
         provider: cfg.llm.provider,
         activeModel: rewriter.model,
         mailboxes: pipeline.mailboxStatus(),
@@ -159,41 +216,37 @@ const api = new Hono()
   .post("/suggest", async (c) => c.json(await pipeline.suggest()))
   .get("/log", (c) => c.json(store.recentLog()))
   .get("/mails/:uid/trace", (c) => c.json(store.getTrace(uid(c))))
-  // Installierte Ollama-Modelle; zu große Modelle (mehr als ~70 % des Arbeitsspeichers) werden markiert
+  // Anbieter (Ollama, MLX, Claude) und ihre Modelle; ?provider= zeigt einen anderen als den aktiven
   .get("/llm/models", async (c) => {
-    const ramGB = totalmem() / 1e9;
-    const base = { provider: cfg.llm.provider, current: rewriter.model, ramGB: Math.round(ramGB) };
-    if (cfg.llm.provider === "claude") return c.json({ ...base, models: [] });
-    try {
-      type Tag = { name: string; size: number; details?: { parameter_size?: string; quantization_level?: string; family?: string } };
-      const [tags, ps] = await Promise.all([
-        fetch(`${cfg.llm.ollamaUrl}/api/tags`).then((r) => r.json() as Promise<{ models: Tag[] }>),
-        fetch(`${cfg.llm.ollamaUrl}/api/ps`).then((r) => r.json() as Promise<{ models: { name: string }[] }>),
-      ]);
-      const loaded = new Set(ps.models.map((m) => m.name));
-      return c.json({
-        ...base,
-        models: tags.models.map((m) => ({
-          name: m.name.replace(/:latest$/, ""),
-          sizeGB: Math.round(m.size / 1e8) / 10,
-          params: m.details?.parameter_size ?? "",
-          quantization: m.details?.quantization_level ?? "",
-          family: m.details?.family ?? "",
-          loaded: loaded.has(m.name),
-          tooBig: m.size / 1e9 > ramGB * 0.7,
-        })),
-      });
-    } catch {
-      return c.json({ ...base, models: [], error: `Ollama nicht erreichbar unter ${cfg.llm.ollamaUrl}` });
-    }
+    const active = cfg.llm.provider;
+    const requested = c.req.query("provider") as LlmProvider | undefined;
+    const provider = requested && LLM_PROVIDERS.includes(requested) ? requested : active;
+    return c.json({
+      provider,
+      active,
+      activeModel: rewriter.model,
+      current: modelFor(provider),
+      ramGB: Math.round(totalmem() / 1e9),
+      providers: LLM_PROVIDERS.map((id) => ({ id, label: PROVIDER_LABEL[id], available: id !== "claude" || cfg.llm.claudeKey })),
+      ...(await listModels(provider)),
+    });
   })
+  // Anbieter und Modell wechseln – gilt ab dem nächsten Entwurf bzw. Kalender-Abruf
   .put("/llm/model", async (c) => {
-    const { model } = (await c.req.json()) as { model: string };
-    const tags = (await (await fetch(`${cfg.llm.ollamaUrl}/api/tags`)).json()) as { models: { name: string }[] };
-    if (!tags.models.some((m) => m.name === model || m.name === `${model}:latest`)) return c.json({ error: `Modell „${model}“ ist nicht installiert` }, 400);
-    store.setSetting("ollama_model", model);
-    return c.json({ current: rewriter.model });
+    const body = (await c.req.json()) as { model: string; provider?: LlmProvider };
+    const provider = body.provider ?? cfg.llm.provider;
+    if (!LLM_PROVIDERS.includes(provider)) return c.json({ error: `Unbekannter Anbieter „${provider}“` }, 400);
+    if (provider === "claude" && !cfg.llm.claudeKey) return c.json({ error: "Für Claude fehlt ANTHROPIC_API_KEY in der .env" }, 400);
+    const { models, error } = await listModels(provider);
+    if (error) return c.json({ error }, 400);
+    if (!models.some((m) => m.name === body.model)) return c.json({ error: `Modell „${body.model}“ ist nicht installiert` }, 400);
+    if (provider !== "claude") store.setSetting(modelSetting(provider), body.model);
+    store.setSetting("llm_provider", provider);
+    cfg.llm.provider = provider;
+    return c.json({ provider, current: rewriter.model });
   })
+  // Abbrechen-Knopf: laufenden Entwurf stoppen (die Mail bleibt unbearbeitet)
+  .post("/llm/cancel", (c) => c.json({ cancelled: pipeline.cancel() }))
   // Live-Datenstrom: was das Modell gerade schreibt (Server-Sent Events)
   .get("/llm/events", (c) =>
     streamSSE(c, async (stream) => {

@@ -87,7 +87,10 @@ async function act<T>(kind: typeof busy.value, fn: () => Promise<T>): Promise<T 
   try {
     return await fn();
   } catch (e) {
-    error.value = (e as Error).message;
+    const msg = (e as Error).message;
+    // Abbruch per Knopf ist kein Fehler
+    if (msg === "Generierung abgebrochen") notice.value = "Generierung abgebrochen – die Mail bleibt unbearbeitet.";
+    else error.value = msg;
   } finally {
     busy.value = "";
   }
@@ -277,6 +280,9 @@ onMounted(load);
           <div class="flex gap-2">
             <button class="btn btn-danger" :disabled="!!busy" title="Mail als erledigt markieren, ohne Beitrag" @click="skip">
               <Icon name="skip" />Überspringen
+            </button>
+            <button v-if="busy === 'preview'" class="btn btn-danger" title="Generierung stoppen" @click="api.cancelLlm()">
+              <Icon name="stop" />Abbrechen
             </button>
             <button class="btn" :class="!article && 'btn-primary'" :disabled="!!busy" @click="preview(!!article)">
               <Icon :name="article ? 'refresh' : 'sparkles'" :class="busy === 'preview' && 'animate-pulse'" />

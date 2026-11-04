@@ -1,7 +1,7 @@
 /** Verdrahtung der Abhängigkeiten – gemeinsam für Server und CLI. */
 
 import { join } from "node:path";
-import { loadConfig } from "./config.ts";
+import { LLM_PROVIDERS, loadConfig, type Config, type LlmProvider } from "./config.ts";
 import { Store } from "./db.ts";
 import { DEMO_ENV, demoDeps } from "./demo.ts";
 import { ImageStore } from "./images.ts";
@@ -12,16 +12,26 @@ import { Push } from "./push.ts";
 import { Rewriter } from "./rewrite.ts";
 import { WordPress } from "./wordpress.ts";
 
+export const modelSetting = (provider: LlmProvider) => (provider === "mlx" ? "mlx_model" : "ollama_model");
+
+/** LLM_PROVIDER ist nur der Standard – die Wahl im Dashboard bleibt gespeichert. */
+function applyStoredProvider(cfg: Config["llm"], store: Store) {
+  const stored = store.getSetting("llm_provider") as LlmProvider | null;
+  if (stored && LLM_PROVIDERS.includes(stored) && (stored !== "claude" || cfg.claudeKey)) cfg.provider = stored;
+}
+
 export function createApp() {
   const demo = process.env.DEMO === "1";
   if (demo) for (const [k, v] of Object.entries(DEMO_ENV)) process.env[k] ??= v;
 
   const cfg = loadConfig();
   const store = new Store(cfg.server.dbPath);
+  applyStoredProvider(cfg.llm, store);
   const push = new Push(store, cfg.server.dataDir);
   const events = new LlmEvents();
   const rewriter = new Rewriter(cfg.llm, cfg.wp.categories, {
-    model: () => store.getSetting("ollama_model") ?? "",
+    // im Dashboard gewähltes Modell, je Anbieter getrennt gespeichert
+    model: () => store.getSetting(modelSetting(cfg.llm.provider)) ?? "",
     events,
     onTrace: (t) => store.saveTrace(t),
   });
