@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LlmEvents, type LlmEvent, type LlmTrace } from "../server/llm-events.ts";
 import type { LlmProvider } from "../server/config.ts";
-import { CancelledError, extractJson, generateJson, isLooping, Rewriter } from "../server/rewrite.ts";
+import { CancelledError, dropInventedDomains, extractJson, generateJson, germanQuotes, isLooping, parseArticle, Rewriter } from "../server/rewrite.ts";
 
 const cfg = {
   provider: "ollama" as LlmProvider, ollamaUrl: "http://ollama.test", ollamaModel: "gemma4",
@@ -17,7 +17,7 @@ const reply = (content: string) => new Response(JSON.stringify({ message: { cont
 const music = JSON.stringify({ artist: "Band", music_news: true, reason: "Tour" });
 const article = JSON.stringify({
   relevant: true, reason: "", title: "Band Tour 2027", slug: "Band Tour", focus_keyword: "Band Tour 2027",
-  meta_description: "Alle Termine.", excerpt: "", content_html: "<p>Hi</p><script>x</script>",
+  meta_description: "Alle Termine.", excerpt: "", content_html: `<p>Hi</p><script>x</script><p>${"Die Band kommt auf Tour. ".repeat(20)}</p>`,
   category: "tourdaten", tags: ["Band"], image_credit: "",
 });
 
@@ -322,4 +322,27 @@ test("ChatGPT (OpenAI-API): Bearer-Key, JSON-Schema, keine Temperatur, Live-Text
 test("ChatGPT: ungültiger Key gibt eine verständliche Meldung", async () => {
   spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 401 }));
   expect(generateJson({ ...cfg, provider: "openai" as LlmProvider }, "gpt-5.4-mini", "s", "u", {})).rejects.toThrow("API-Key ungültig");
+});
+
+test("abgeschnittener Beitrag (gerades Anführungszeichen) gilt als ungültig", () => {
+  const stub = { ...JSON.parse(article), content_html: "<p>Doch auf ihrer neuen Single „Rauschgift</p>" };
+  expect(() => parseArticle(stub)).toThrow(SyntaxError);
+  const full = { ...stub, content_html: `<p>${"Wort ".repeat(120)}</p>` };
+  expect(parseArticle(full).relevant).toBe(true);
+  expect(parseArticle({ ...stub, relevant: false }).relevant).toBe(false); // nicht relevant: kein Text nötig
+});
+
+test("erfundene Webadressen fliegen raus, Adressen aus der Mail bleiben", () => {
+  const html = "<p>Die Band spielt live.</p><p>🎟️ Tickets: via Mine Tour – mine.de/tour</p><p>Infos: www.band.com</p>"
+    + '<p>Mehr unter <a href="https://erfunden.de">erfunden.de</a></p><p>Kontakt: presse@agentur.de</p>';
+  const out = dropInventedDomains(html, "infos auf https://www.band.com – kontakt presse@agentur.de");
+  expect(out).toContain("Die Band spielt live.");
+  expect(out).not.toContain("mine.de");
+  expect(out).toContain("www.band.com");
+  expect(out).toContain("erfunden.de"); // verlinkt: das prüft keepMailLinks
+  expect(out).toContain("presse@agentur.de");
+});
+
+test("gerade Anführungszeichen werden deutsch", () => {
+  expect(germanQuotes('Die neue Single "Rauschgift" erscheint')).toBe("Die neue Single „Rauschgift“ erscheint");
 });

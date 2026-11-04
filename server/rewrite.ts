@@ -25,16 +25,25 @@ Startups, Wettbewerbe von Unternehmen, Mode, Lifestyle, Politik, Rechnungen, Wer
 auch wenn Wörter wie „Release“, „Live“, „Show“, „Launch“ oder „Pitch“ vorkommen.
 
 Nenne zuerst die Band bzw. den Künstler oder das Festival, um das es geht. Gibt es keine, \
-ist es keine Musik-News.`;
+ist es keine Musik-News.
+
+Ordne die Meldung einer Art zu: tour (Tour, mehrere Konzerttermine), album (Album, Single, EP, \
+Musikvideo – auch ohne Termine), festival (Festival, Line-up), konzert (ein einzelnes Konzert), \
+sonstiges (alles andere, z. B. Band-News).`;
+
+/** Art der Meldung – bestimmt, welcher Aufbau-Abschnitt des Regelwerks mitgeschickt wird */
+export const MELDUNGSARTEN = ["tour", "album", "festival", "konzert", "sonstiges"] as const;
+export type Meldungsart = (typeof MELDUNGSARTEN)[number];
 
 const CLASSIFY_SCHEMA = {
   type: "object",
   properties: {
     artist: { type: "string", description: "Band/Künstler/Festival oder leer" },
     music_news: { type: "boolean" },
+    art: { type: "string", enum: MELDUNGSARTEN },
     reason: { type: "string" },
   },
-  required: ["artist", "music_news", "reason"],
+  required: ["artist", "music_news", "art", "reason"],
   additionalProperties: false,
 };
 
@@ -72,6 +81,8 @@ blockquote. Keine h1, kein Inline-CSS, keine Bilder.
 weg – niemals Platzhalter wie „[Link zu …]“, „[Website]“ oder „Link folgt“.
 - Keine Links zu Downloads, Presseordnern, Pressefotos oder Hörproben (WeTransfer, Dropbox, \
 private SoundCloud-Links usw.) und keine YouTube-Links – Videos bindet die Redaktion selbst ein.
+- Anführungszeichen im Text immer deutsch „…“ – niemals das gerade Zeichen ", das beendet sonst das \
+JSON-Feld und der Beitrag bricht ab.
 - Nicht gendern: keine Genderzeichen (: * _ Binnen-I), generisches Maskulinum (Leser, Fans, Musiker).
 - excerpt: 1–2 Sätze Teaser.
 - category: genau eine aus {categories}.
@@ -153,7 +164,7 @@ export function degender(text: string): string {
 const degenderHtml = (html: string) => html.split(/(<[^>]+>)/).map((part) => (part.startsWith("<") ? part : degender(part))).join("");
 
 /** Markdown-Reste entfernen, die lokale Modelle gern in Textfelder schreiben. */
-const plain = (s: string) => degender(s).replace(/\*\*(.+?)\*\*/g, "$1").replace(/(^|\s)\*(\S.*?)\*(?=[\s.,;:!?)]|$)/g, "$1$2").replace(/\s+/g, " ").trim();
+const plain = (s: string) => germanQuotes(degender(s)).replace(/\*\*(.+?)\*\*/g, "$1").replace(/(^|\s)\*(\S.*?)\*(?=[\s.,;:!?)]|$)/g, "$1$2").replace(/\s+/g, " ").trim();
 
 /** Ziele, die nie in einen Artikel gehören: Download-Dienste, Presseordner, private Hörproben, Dateien. */
 const BLOCKED_HOST = /(^|\.)(wetransfer\.com|we\.tl|dropbox\.com|db\.tt|drive\.google\.com|docs\.google\.com|box\.com|mega\.nz|1drv\.ms|onedrive\.live\.com|sharepoint\.com|icloud\.com|sendspace\.com|filemail\.com|transfernow\.net|fromsmash\.com|swisstransfer\.com|haulix\.com|promoreel\.com|label-worx\.com|music-promo\.\w+|promojukebox\.\w+|presskit\.to|musicpromo\.\w+)$/i;
@@ -224,9 +235,29 @@ const normalizeUrl = (url: string) => url.replace(/&amp;/g, "&").replace(/^https
 export function keepMailLinks(html: string, mail: Pick<PressMail, "body" | "html">): string {
   const source = `${mail.body}\n${mail.html ?? ""}`.replace(/&amp;/g, "&");
   const known = new Set([...source.matchAll(/https?:\/\/[^\s<>"'\])]+/gi)].map(([u]) => normalizeUrl(u)));
-  return html.replace(/<a\b[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (m, href: string, text: string) =>
+  const linked = html.replace(/<a\b[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (m, href: string, text: string) =>
     href.startsWith("mailto:") || known.has(normalizeUrl(href)) ? m : text);
+  return dropInventedDomains(linked, source.toLowerCase());
 }
+
+/** Webadresse im Text, z. B. „iuma.de“, „www.mine.de/tour“ */
+const BARE_DOMAIN = /(?<![@\w.-])(?:https?:\/\/)?((?:[a-z0-9-]+\.)+(?:de|com|ch|at|net|org|shop|eu|info|io|fm|tv|band|music|live))(?![\w-])(?:\/[^\s<]*)?/gi;
+
+/**
+ * Absätze mit Webadressen, die nirgends in der Mail stehen, entfernen – Modelle ergänzen gern eine
+ * plausible „band.de“ oder „band.de/tour“, die es so nicht gibt. Verlinkter Text bleibt unberührt.
+ */
+export function dropInventedDomains(html: string, source: string): string {
+  return html.replace(/<(p|li)\b[^>]*>([\s\S]*?)<\/\1>/gi, (block, _tag, inner: string) => {
+    const text = inner.replace(/<a\b[\s\S]*?<\/a>/gi, " ").replace(/<[^>]+>/g, " ");
+    const invented = [...text.matchAll(BARE_DOMAIN)].some(([, host]) => !source.includes(host!.toLowerCase().replace(/^www\./, "")));
+    return invented ? "" : block;
+  });
+}
+
+/** Gerade Anführungszeichen "…" im Text durch deutsche „…“ ersetzen (HTML-Attribute bleiben, wie sie sind). */
+export const germanQuotes = (text: string) => text.replace(/"([^"<>\n]{1,120})"/g, "„$1“");
+const germanQuotesHtml = (html: string) => html.split(/(<[^>]*>)/).map((part) => (part.startsWith("<") ? part : germanQuotes(part))).join("");
 
 /** „[Link zu Reaper Entertainment oder offizielle Website]“, „[URL]“, „(Link folgt)“ … */
 const PLACEHOLDER = /(?:\s+(?:über|unter|bei|auf|via|hier|im|in der|in))?\s*(?:\[(?!https?:)[^\]<]{0,100}\b(?:link|url|website|webseite|homepage|ticket-?shop|vorverkaufsstelle|offizielle)[^\]<]{0,100}\]|\(link folgt\)|link folgt)/gi;
@@ -250,7 +281,7 @@ export function stripPlaceholders(html: string): string {
 
 /** Typische Formfehler im Beitragstext beheben, bevor das HTML gefiltert wird. */
 export function tidyContent(html: string): string {
-  return degenderHtml(stripPlaceholders(stripPressLinks(html)))
+  return germanQuotesHtml(degenderHtml(stripPlaceholders(stripPressLinks(html))))
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")           // Markdown-Fett → HTML
     .replace(/^\s*<h[23][^>]*>[\s\S]*?<\/h[23]>\s*/i, "")       // Beitrag beginnt mit dem Einstieg, nicht mit einer Überschrift
     .replace(/(^|[^\d.])(\d)\.(\d{2})\.(\d{2,4})(?!\d)/g, "$10$2.$3.$4"); // 1.04.2027 → 01.04.2027
@@ -594,10 +625,31 @@ export async function generateJson(
 export const defaultModel = (cfg: Config["llm"]) =>
   ({ claude: cfg.claudeModel, mlx: cfg.mlxModel, opencode: cfg.opencodeModel, openai: cfg.openaiModel, ollama: cfg.ollamaModel })[cfg.provider];
 
-/** Stil-Regelwerk der Redaktion (Markdown), wird an die Schreib-Anweisung angehängt. */
-export function loadStyleGuide(path: string): string {
+/**
+ * Stil-Regelwerk der Redaktion (Markdown), wird an die Schreib-Anweisung angehängt. Mit `art` nur der
+ * passende „## Aufbau: … (art)“-Abschnitt – das hält die Anweisung kurz, gerade für lokale Modelle.
+ * Ohne Art (oder „sonstiges“) gehen alle Aufbau-Abschnitte mit.
+ */
+export function loadStyleGuide(path: string, art?: Meldungsart): string {
   if (!path || !existsSync(path)) return "";
-  return `\n\n# Stil-Regelwerk der Redaktion – verbindlich\n\n${readFileSync(path, "utf8").trim()}\n`;
+  const sections = readFileSync(path, "utf8").trim().split(/^(?=## )/m);
+  const kept = sections.filter((section) => {
+    if (section.startsWith("## Aufbau nach Art")) return false; // Hinweis für Menschen, nicht fürs Modell
+    const own = section.match(/^## Aufbau:.*\((\w+)\)/)?.[1];
+    return !own || !art || art === "sonstiges" || own === art;
+  });
+  return `\n\n# Stil-Regelwerk der Redaktion – verbindlich\n\n${kept.join("").trim()}\n`;
+}
+
+/**
+ * Beitrag prüfen. Schreibt ein Modell ein gerades " statt „…“, endet das JSON-Feld dort und der Rest des
+ * Textes fehlt – solche Stummel gelten als ungültig, damit neu gefragt statt gespeichert wird.
+ */
+export function parseArticle(raw: unknown): Article {
+  const article = ArticleSchema.parse(raw);
+  const words = article.content_html.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
+  if (article.relevant && words < 80) throw new SyntaxError(`Beitrag nach ${words} Wörtern abgebrochen (vermutlich ein gerades Anführungszeichen)`);
+  return article;
 }
 
 /** Abbruch über den Knopf im Dashboard */
@@ -638,14 +690,22 @@ export interface RewriterOptions {
 }
 
 export class Rewriter {
-  private system: string;
+  /** Schreib-Anweisung je Meldungsart (Regelwerk mit passendem Aufbau-Abschnitt) */
+  private systems = new Map<Meldungsart | "", string>();
+  private base: string;
   /** laufende Generierung – für den Abbrechen-Knopf */
   private running?: AbortController;
 
   constructor(private cfg: Config["llm"], private categories: string[], private opts: RewriterOptions = {}) {
-    this.system = SYSTEM_PROMPT.replace("{siteName}", cfg.siteName)
+    this.base = SYSTEM_PROMPT.replace("{siteName}", cfg.siteName)
       .replace("{siteTone}", cfg.siteTone)
-      .replace("{categories}", categories.join(", ")) + loadStyleGuide(cfg.styleFile);
+      .replace("{categories}", categories.join(", "));
+  }
+
+  private system(art?: Meldungsart): string {
+    const key = art ?? "";
+    if (!this.systems.has(key)) this.systems.set(key, this.base + loadStyleGuide(this.cfg.styleFile, art));
+    return this.systems.get(key)!;
   }
 
   get model(): string {
@@ -716,14 +776,17 @@ export class Rewriter {
     try {
       // Stufe 1: Ist das überhaupt Musik? (Anfang der Mail reicht und ist schnell)
       const check = await this.ask(mail.uid, "check", llm, model, CLASSIFY_PROMPT, user.slice(0, 6000), CLASSIFY_SCHEMA, (r) =>
-        z.object({ artist: z.string(), music_news: z.boolean(), reason: z.string() }).parse(r), run.signal);
+        z.object({
+          artist: z.string(), music_news: z.boolean(), reason: z.string(),
+          art: z.enum(MELDUNGSARTEN).optional().catch(undefined),
+        }).parse(r), run.signal);
       if (check === null) {
         result = ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt", generated_by: model });
       } else if (!check.music_news || !check.artist.trim()) {
         result = ArticleSchema.parse({ relevant: false, reason: `Keine Musik-News: ${check.reason}`, generated_by: model });
       } else {
         // Stufe 2: Beitrag schreiben
-        const article = await this.ask(mail.uid, "write", llm, model, this.system, user, JSON_SCHEMA, (r) => ArticleSchema.parse(r), run.signal);
+        const article = await this.ask(mail.uid, "write", llm, model, this.system(check.art), user, JSON_SCHEMA, parseArticle, run.signal);
         result = article === null
           ? ArticleSchema.parse({ relevant: false, reason: "Das Modell hat die Anfrage abgelehnt", generated_by: model })
           : { ...cleanArticle({ ...article, content_html: keepMailLinks(article.content_html, mail) }, this.categories), generated_by: model };
