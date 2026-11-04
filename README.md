@@ -203,8 +203,8 @@ Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen
 
 ## Modell wechseln und zuschauen
 
-- **Einstellungen → Sprachmodell**: oben den Anbieter wählen (**Ollama**, **MLX** oder
-  **Claude**), darunter erscheinen seine Modelle (bei Ollama mit Größe, Quantisierung, ob gerade
+- **Einstellungen → Sprachmodell**: oben den Anbieter wählen (**Ollama**, **MLX**,
+  **OpenCode**, **ChatGPT** oder **Claude**), darunter erscheinen seine Modelle (bei Ollama mit Größe, Quantisierung, ob gerade
   geladen, Warnung bei zu wenig Arbeitsspeicher). Ein Klick auf ein Modell schaltet Anbieter und
   Modell um – für Postfach und Konzertkalender, ab dem nächsten Entwurf bzw. Abruf, und bleibt
   gespeichert. `LLM_PROVIDER`, `OLLAMA_MODEL` und `MLX_MODEL` sind nur die Standards.
@@ -219,6 +219,13 @@ Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen
 - MLX (Apple Silicon): `mlx_lm.server --port 8080` starten, dann im Dashboard „MLX“ wählen
   (Adresse über `MLX_URL`). Gelistet werden die heruntergeladenen MLX-Modelle. MLX erzwingt kein JSON-Schema – das Schema steht in
   der Anweisung, ungültige Antworten werden einmal neu angefragt.
+- OpenCode: `opencode serve --port 4096` starten, dann im Dashboard „OpenCode“ wählen (Adresse über
+  `OPENCODE_URL`). Gelistet werden alle Modelle der in OpenCode eingerichteten Anbieter
+  (`opencode auth login`), ohne Anmeldung die Gratis-Modelle. Meldet OpenCode ein Limit (z. B.
+  „Free usage exceeded“), bricht die App sofort mit dieser Meldung ab, statt zu warten.
+- ChatGPT: `OPENAI_API_KEY` (platform.openai.com) in der `.env` setzen, dann ist „ChatGPT“ wählbar.
+  Gelistet werden die Text-Chatmodelle deines OpenAI-Kontos; das JSON-Schema erzwingt OpenAI selbst.
+  Abgerechnet wird nach Tokens, unabhängig vom ChatGPT-Abo.
 - Claude: `ANTHROPIC_API_KEY` in der `.env` setzen, dann ist „Claude“ im Dashboard wählbar.
 
 ## Stil-Regelwerk

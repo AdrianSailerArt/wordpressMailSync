@@ -54,7 +54,7 @@ export interface LlmModel {
   tooBig: boolean;
 }
 
-export type LlmProvider = "ollama" | "mlx" | "claude";
+export type LlmProvider = "ollama" | "mlx" | "opencode" | "openai" | "claude";
 
 export interface ModelsResponse {
   /** Anbieter, dessen Modelle gelistet sind */
@@ -148,7 +148,7 @@ export interface Status {
     timezone: string;
     perRun: number;
     autoPublish: boolean;
-    provider: "ollama" | "mlx" | "claude";
+    provider: "ollama" | "mlx" | "opencode" | "openai" | "claude";
     activeModel: string;
     suggestSchedule: string;
   };

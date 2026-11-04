@@ -6,7 +6,7 @@ import { basicAuth } from "hono/basic-auth";
 import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { totalmem } from "node:os";
-import { createApp, modelSetting } from "./app.ts";
+import { createApp, modelSetting, providerReady } from "./app.ts";
 import { LLM_PROVIDERS, loadKalenderConfig, type LlmProvider } from "./config.ts";
 import { Kalender, type Auswahl, type KalenderResult } from "./kalender/sync.ts";
 import { mailCsp } from "./mail-view.ts";
@@ -99,7 +99,7 @@ app.onError((err, c) => {
 
 const uid = (c: { req: { param(k: "uid"): string } }) => Number(c.req.param("uid"));
 
-const PROVIDER_LABEL: Record<LlmProvider, string> = { ollama: "Ollama", mlx: "MLX", claude: "Claude" };
+const PROVIDER_LABEL: Record<LlmProvider, string> = { ollama: "Ollama", mlx: "MLX", opencode: "OpenCode", openai: "ChatGPT", claude: "Claude" };
 
 /** Gewähltes Modell eines Anbieters (auch wenn er gerade nicht aktiv ist) */
 const modelFor = (provider: LlmProvider) =>
@@ -116,6 +116,39 @@ async function listModels(provider: LlmProvider): Promise<{ models: LlmModel[]; 
     return cfg.llm.claudeKey
       ? { models: [{ name: cfg.llm.claudeModel, sizeGB: 0, params: "", quantization: "", family: "Claude-API", loaded: false, tooBig: false }] }
       : { models: [], error: "Für Claude fehlt ANTHROPIC_API_KEY in der .env" };
+  }
+  if (provider === "openai") {
+    if (!cfg.llm.openaiKey) return { models: [], error: "Für ChatGPT fehlt OPENAI_API_KEY in der .env" };
+    try {
+      const res = await fetch(`${cfg.llm.openaiUrl}/models`, {
+        headers: { Authorization: `Bearer ${cfg.llm.openaiKey}` }, signal: AbortSignal.timeout(10_000),
+      });
+      if (res.status === 401) return { models: [], error: "OpenAI: API-Key ungültig (OPENAI_API_KEY prüfen)" };
+      const ids = ((await res.json()) as { data: { id: string }[] }).data.map((m) => m.id);
+      // nur Text-Chatmodelle – keine Audio-, Bild-, Such- oder Embedding-Varianten
+      const chat = ids.filter((id) => /^(gpt-|o\d|chatgpt-)/.test(id) && !/audio|realtime|transcribe|tts|image|search|embedding|instruct/.test(id));
+      return {
+        models: chat.sort().map((name) => ({ name, sizeGB: 0, params: "", quantization: "", family: "OpenAI-API", loaded: false, tooBig: false })),
+      };
+    } catch {
+      return { models: [], error: "OpenAI nicht erreichbar – Internetverbindung prüfen" };
+    }
+  }
+  if (provider === "opencode") {
+    try {
+      // alle Modelle der in OpenCode eingerichteten Anbieter, als „anbieter/modell“
+      type OcModel = { id: string; name: string; family?: string; status?: string; cost?: { input?: number; output?: number } };
+      const res = await fetch(`${cfg.llm.opencodeUrl}/config/providers`, { signal: AbortSignal.timeout(5000) });
+      const { providers } = (await res.json()) as { providers: { id: string; name: string; models: Record<string, OcModel> }[] };
+      const price = (m: OcModel) => (m.cost?.output ? `$${m.cost.input ?? 0} / $${m.cost.output} je 1 Mio. Tokens` : "kostenlos");
+      return {
+        models: providers.flatMap((p) => Object.values(p.models)
+          .filter((m) => m.status !== "deprecated")
+          .map((m) => ({ name: `${p.id}/${m.id}`, sizeGB: 0, params: m.name, family: p.name, quantization: price(m), loaded: false, tooBig: false }))),
+      };
+    } catch {
+      return { models: [], error: `OpenCode nicht erreichbar unter ${cfg.llm.opencodeUrl} – läuft „opencode serve --port 4096“?` };
+    }
   }
   if (provider === "mlx") {
     try {
@@ -170,7 +203,9 @@ const api = new Hono()
         site: cfg.llm.siteName,
         wpUrl: cfg.wp.url,
         wpStatus: cfg.wp.status,
-        model: cfg.llm.provider === "claude" ? `Claude (${rewriter.model})` : `lokal: ${rewriter.model} (${cfg.llm.provider === "mlx" ? "MLX" : "Ollama"})`,
+        model: cfg.llm.provider !== "claude" && cfg.llm.provider !== "openai"
+          ? `lokal: ${rewriter.model} (${PROVIDER_LABEL[cfg.llm.provider]})`
+          : `${PROVIDER_LABEL[cfg.llm.provider]}: ${rewriter.model}`,
         provider: cfg.llm.provider,
         activeModel: rewriter.model,
         mailboxes: pipeline.mailboxStatus(),
@@ -227,7 +262,7 @@ const api = new Hono()
       activeModel: rewriter.model,
       current: modelFor(provider),
       ramGB: Math.round(totalmem() / 1e9),
-      providers: LLM_PROVIDERS.map((id) => ({ id, label: PROVIDER_LABEL[id], available: id !== "claude" || cfg.llm.claudeKey })),
+      providers: LLM_PROVIDERS.map((id) => ({ id, label: PROVIDER_LABEL[id], available: providerReady(cfg.llm, id) })),
       ...(await listModels(provider)),
     });
   })
@@ -236,7 +271,7 @@ const api = new Hono()
     const body = (await c.req.json()) as { model: string; provider?: LlmProvider };
     const provider = body.provider ?? cfg.llm.provider;
     if (!LLM_PROVIDERS.includes(provider)) return c.json({ error: `Unbekannter Anbieter „${provider}“` }, 400);
-    if (provider === "claude" && !cfg.llm.claudeKey) return c.json({ error: "Für Claude fehlt ANTHROPIC_API_KEY in der .env" }, 400);
+    if (!providerReady(cfg.llm, provider)) return c.json({ error: `Für ${PROVIDER_LABEL[provider]} fehlt der API-Key in der .env` }, 400);
     const { models, error } = await listModels(provider);
     if (error) return c.json({ error }, 400);
     if (!models.some((m) => m.name === body.model)) return c.json({ error: `Modell „${body.model}“ ist nicht installiert` }, 400);

@@ -12,12 +12,16 @@ import { Push } from "./push.ts";
 import { Rewriter } from "./rewrite.ts";
 import { WordPress } from "./wordpress.ts";
 
-export const modelSetting = (provider: LlmProvider) => (provider === "mlx" ? "mlx_model" : "ollama_model");
+export const modelSetting = (provider: LlmProvider) => `${provider}_model`;
+
+/** Cloud-Anbieter sind nur wählbar, wenn ihr API-Key in der .env steht */
+export const providerReady = (cfg: Config["llm"], provider: LlmProvider) =>
+  provider === "claude" ? cfg.claudeKey : provider === "openai" ? !!cfg.openaiKey : true;
 
 /** LLM_PROVIDER ist nur der Standard – die Wahl im Dashboard bleibt gespeichert. */
 function applyStoredProvider(cfg: Config["llm"], store: Store) {
   const stored = store.getSetting("llm_provider") as LlmProvider | null;
-  if (stored && LLM_PROVIDERS.includes(stored) && (stored !== "claude" || cfg.claudeKey)) cfg.provider = stored;
+  if (stored && LLM_PROVIDERS.includes(stored) && providerReady(cfg, stored)) cfg.provider = stored;
 }
 
 export function createApp() {

@@ -45,6 +45,8 @@ const isChosen = (name: string) => !!data.value && isActive(data.value.provider)
 const HINT: Record<LlmProvider, string> = {
   ollama: "Ollama-App starten · Modelle installieren: ollama pull <name>",
   mlx: "Server starten: mlx_lm.server --port 8080 · Modelle laden: hf download mlx-community/<name>",
+  opencode: "Server starten: opencode serve --port 4096 · Anbieter einrichten: opencode auth login",
+  openai: "OpenAI-API · OPENAI_API_KEY in der .env (platform.openai.com) · Abrechnung nach Tokens",
   claude: "Claude-API · ANTHROPIC_API_KEY in der .env",
 };
 
@@ -60,7 +62,7 @@ onMounted(() => load());
           :key="p.id"
           :aria-pressed="data.provider === p.id"
           :disabled="!p.available || loading"
-          :title="p.available ? '' : 'ANTHROPIC_API_KEY fehlt in der .env'"
+          :title="p.available ? '' : `${p.id === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'} fehlt in der .env`"
           class="disabled:cursor-not-allowed disabled:opacity-40"
           @click="load(p.id)"
         >

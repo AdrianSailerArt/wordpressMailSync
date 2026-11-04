@@ -8,7 +8,9 @@ import { CancelledError, extractJson, generateJson, isLooping, Rewriter } from "
 
 const cfg = {
   provider: "ollama" as LlmProvider, ollamaUrl: "http://ollama.test", ollamaModel: "gemma4",
-  mlxUrl: "http://mlx.test", mlxModel: "mlx-community/gemma-4-e4b-it-4bit", claudeModel: "", claudeKey: false, siteName: "Blog", siteTone: "locker", styleFile: "",
+  mlxUrl: "http://mlx.test", mlxModel: "mlx-community/gemma-4-e4b-it-4bit",
+  opencodeUrl: "http://opencode.test", opencodeModel: "opencode/big-pickle",
+  openaiUrl: "http://openai.test/v1", openaiKey: "sk-test", openaiModel: "gpt-5.4-mini", claudeModel: "", claudeKey: false, siteName: "Blog", siteTone: "locker", styleFile: "",
 };
 const mail = { uid: 1, messageId: "<1@test>", subject: "Band – Tour 2027", sender: "x", date: "", body: "Tourdaten …", images: [] };
 const reply = (content: string) => new Response(JSON.stringify({ message: { content } }));
@@ -226,4 +228,98 @@ test("isLooping: Leerlauf und Dauerschleifen, normaler Text nicht", () => {
   expect(isLooping(prose.repeat(12))).toBe(true); // derselbe Satz immer wieder
   expect(isLooping(Array.from({ length: 30 }, (_, i) => `Termin ${i + 1}: ${10 + i}.03.2027 – Stadt ${i}`).join("\n"))).toBe(false);
   expect(isLooping("kurz")).toBe(false);
+});
+
+/** lokaler OpenCode-Server: Antworten je Pfad, Ereignis-Strom mit den angegebenen Ereignissen */
+function opencodeServer(events: object[], message: object | null) {
+  const calls: { method: string; path: string; body?: any }[] = [];
+  const spy = spyOn(globalThis, "fetch").mockImplementation((async (url: string, init?: RequestInit) => {
+    const path = new URL(String(url)).pathname;
+    const method = init?.method ?? "GET";
+    calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (path === "/session" && method === "POST") return new Response(JSON.stringify({ id: "ses_1" }));
+    if (path === "/event") {
+      const lines = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+      return new Response(new ReadableStream({
+        start(ctrl) {
+          ctrl.enqueue(new TextEncoder().encode(lines));
+          init!.signal!.addEventListener("abort", () => ctrl.close());
+        },
+      }));
+    }
+    if (path.endsWith("/message")) {
+      // auf ein Limit wartet OpenCode – hier: hängen bis zum Abbruch
+      if (!message) return new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+      await Bun.sleep(5);
+      return new Response(JSON.stringify(message));
+    }
+    return new Response("true");
+  }) as unknown as typeof fetch);
+  return { calls, spy };
+}
+const oc = { ...cfg, provider: "opencode" as LlmProvider, opencodeModel: "opencode/big-pickle" };
+
+test("OpenCode lokal: Sitzung ohne Werkzeuge, JSON nach Schema, fremde Sitzungen ignoriert, danach aufgeräumt", async () => {
+  const delta = (d: string) => ({ type: "session.next.text.delta", properties: { sessionID: "ses_1", delta: d } });
+  const { calls } = opencodeServer(
+    [delta('{"artist":'), { type: "session.next.text.delta", properties: { sessionID: "anders", delta: "fremd" } }, delta('"Band"}')],
+    { info: { structured: JSON.parse(music), tokens: { input: 50, output: 20 } }, parts: [] },
+  );
+  expect(new Rewriter(oc, ["News"]).model).toBe("opencode/big-pickle");
+  const raw = await generateJson(oc, "opencode/big-pickle", "sys", "text", { type: "object" });
+  expect(raw).toEqual(JSON.parse(music));
+
+  const msg = calls.find((c) => c.path === "/session/ses_1/message")!;
+  expect(msg.body.model).toEqual({ providerID: "opencode", modelID: "big-pickle" });
+  expect(msg.body.tools).toEqual({ "*": false });
+  expect(msg.body.format.type).toBe("json_schema");
+  expect(msg.body.system).toBe("sys");
+  expect(calls.some((c) => c.method === "DELETE" && c.path === "/session/ses_1")).toBe(true);
+});
+
+test("OpenCode: Limit („retry“) bricht sofort mit verständlicher Meldung ab", async () => {
+  const { calls } = opencodeServer(
+    [{ type: "session.status", properties: { sessionID: "ses_1", status: { type: "retry", attempt: 1, message: "Free usage exceeded, subscribe to Go" } } }],
+    null,
+  );
+  expect(generateJson(oc, "opencode/big-pickle", "sys", "text", {})).rejects.toThrow("Free usage exceeded");
+  await Bun.sleep(30);
+  expect(calls.some((c) => c.path === "/session/ses_1/abort")).toBe(true);
+});
+
+test("OpenCode: Live-Textstücke landen in der Live-Ausgabe", async () => {
+  const delta = (d: string) => ({ type: "session.next.text.delta", properties: { sessionID: "ses_1", delta: d } });
+  opencodeServer([delta("Hallo "), delta("Welt")], { info: { structured: JSON.parse(music) }, parts: [] });
+  const tokens: string[] = [];
+  const events = new LlmEvents();
+  events.subscribe((e) => e.type === "token" && tokens.push(e.text));
+  // Stufe 1 (Musik-Prüfung) reicht; Stufe 2 bekommt dieselbe Antwort und scheitert an der Prüfung – egal hier
+  await new Rewriter(oc, ["News"], { events }).rewrite(mail).catch(() => undefined);
+  expect(tokens.join("")).toContain("Hallo Welt");
+});
+
+test("ChatGPT (OpenAI-API): Bearer-Key, JSON-Schema, keine Temperatur, Live-Text", async () => {
+  const gpt = { ...cfg, provider: "openai" as LlmProvider };
+  const spy = spyOn(globalThis, "fetch").mockResolvedValueOnce(mlxStream(music)).mockResolvedValueOnce(mlxStream(article));
+  const tokens: string[] = [];
+  const events = new LlmEvents();
+  events.subscribe((e) => e.type === "token" && tokens.push(e.text));
+  const rw = new Rewriter(gpt, ["News"], { events });
+  expect(rw.model).toBe("gpt-5.4-mini");
+  const result = await rw.rewrite(mail);
+
+  expect(String(spy.mock.calls[0]![0])).toBe("http://openai.test/v1/chat/completions");
+  expect(((spy.mock.calls[0]![1] as RequestInit).headers as Record<string, string>).Authorization).toBe("Bearer sk-test");
+  const req = body(spy, 1);
+  expect(req.model).toBe("gpt-5.4-mini");
+  expect(req.response_format.type).toBe("json_schema");
+  expect(req.temperature).toBeUndefined();
+  expect(req.max_completion_tokens).toBeGreaterThan(4000);
+  expect(result.title).toBe("Band Tour 2027");
+  expect(tokens.join("")).toContain("Band Tour 2027");
+});
+
+test("ChatGPT: ungültiger Key gibt eine verständliche Meldung", async () => {
+  spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 401 }));
+  expect(generateJson({ ...cfg, provider: "openai" as LlmProvider }, "gpt-5.4-mini", "s", "u", {})).rejects.toThrow("API-Key ungültig");
 });

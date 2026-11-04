@@ -358,35 +358,60 @@ export function extractJson(text: string): string {
   return start === -1 || end < start ? text.trim() : text.slice(start, end + 1);
 }
 
+/** Ziel der OpenAI-Schnittstelle: ChatGPT (OpenAI-API) oder MLX lokal, das dieselbe Schnittstelle nachbildet */
+function openAiTarget(cfg: Config["llm"], schema: object, temperature: number) {
+  if (cfg.provider === "openai") {
+    return {
+      label: "OpenAI",
+      url: `${cfg.openaiUrl}/chat/completions`,
+      headers: { Authorization: `Bearer ${cfg.openaiKey}` } as Record<string, string>,
+      // GPT-5 & Co. nehmen nur die Standard-Temperatur an; das Schema erzwingt OpenAI selbst
+      body: {
+        max_completion_tokens: 16000,
+        response_format: { type: "json_schema", json_schema: { name: "antwort", schema, strict: false } },
+      } as Record<string, unknown>,
+      unreachable: "OpenAI nicht erreichbar – Internetverbindung prüfen",
+    };
+  }
+  return {
+    label: "MLX",
+    url: `${cfg.mlxUrl}/v1/chat/completions`,
+    headers: {} as Record<string, string>,
+    // Standard des Servers (512 Tokens) reicht für keinen Beitrag
+    body: { temperature, max_tokens: 8192, chat_template_kwargs: { enable_thinking: false } } as Record<string, unknown>,
+    unreachable: `MLX nicht erreichbar unter ${cfg.mlxUrl} – läuft mlx_lm.server?`,
+  };
+}
+
 /**
- * MLX (`mlx_lm.server`, OpenAI-kompatibel). Der Server kennt kein JSON-Schema, deshalb steht es in der
- * Anweisung; Fehlerhaftes fängt die Prüfung danach ab (und fragt einmal neu).
+ * OpenAI-Schnittstelle (ChatGPT über die API, MLX lokal). MLX kennt kein JSON-Schema, deshalb steht es immer
+ * auch in der Anweisung; Fehlerhaftes fängt die Prüfung danach ab (und fragt einmal neu).
  */
-async function generateMlx(
+async function generateOpenAi(
   cfg: Config["llm"], model: string, system: string, user: string, schema: object, onToken: (t: string) => void, temperature = 0.4,
   abort?: AbortSignal,
 ): Promise<Generated> {
   const started = Date.now();
+  const target = openAiTarget(cfg, schema, temperature);
   const instruction = `${system}\n\nAntworte ausschließlich mit einem einzigen JSON-Objekt nach diesem JSON-Schema, ohne Text davor oder danach und ohne Markdown:\n${JSON.stringify(schema)}`;
-  const res = await fetch(`${cfg.mlxUrl}/v1/chat/completions`, {
+  const res = await fetch(target.url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...target.headers },
     body: JSON.stringify({
       model,
       messages: [{ role: "system", content: instruction }, { role: "user", content: user }],
       stream: true,
       stream_options: { include_usage: true },
-      temperature,
-      max_tokens: 8192, // Standard des Servers (512) reicht für keinen Beitrag
-      chat_template_kwargs: { enable_thinking: false },
+      ...target.body,
     }),
     signal: abort ? AbortSignal.any([abort, AbortSignal.timeout(10 * 60_000)]) : AbortSignal.timeout(10 * 60_000),
   }).catch((err) => {
     if (abort?.aborted) throw err;
-    throw new Error(`MLX nicht erreichbar unter ${cfg.mlxUrl} – läuft mlx_lm.server? (${err})`);
+    throw new Error(`${target.unreachable} (${err})`);
   });
-  if (!res.ok) throw new Error(`MLX: ${res.status} ${(await res.text()).slice(0, 300)}`);
-  if (!res.body) throw new Error("Leere Antwort von MLX");
+  if (res.status === 401) throw new Error(`${target.label}: API-Key ungültig (OPENAI_API_KEY prüfen)`);
+  if (!res.ok) throw new Error(`${target.label}: ${res.status} ${(await res.text()).slice(0, 300)}`);
+  if (!res.body) throw new Error(`Leere Antwort von ${target.label}`);
 
   // Server-Sent Events: „data: {…}“ je Textstück, am Ende die Token-Zahlen und „data: [DONE]“
   let raw = "";
@@ -398,7 +423,7 @@ async function generateMlx(
     const data = line.slice(5).trim();
     if (!data || data === "[DONE]") return;
     const msg = JSON.parse(data) as { choices?: { delta?: { content?: string } }[]; usage?: typeof usage; error?: unknown };
-    if (msg.error) throw new Error(`MLX: ${JSON.stringify(msg.error)}`);
+    if (msg.error) throw new Error(`${target.label}: ${JSON.stringify(msg.error)}`);
     const text = msg.choices?.[0]?.delta?.content ?? "";
     if (text) {
       firstToken ||= Date.now();
@@ -417,7 +442,7 @@ async function generateMlx(
     }
   }
   handleLine(buffer + decoder.decode());
-  if (!raw) throw new Error("Leere Antwort von MLX");
+  if (!raw) throw new Error(`Leere Antwort von ${target.label}`);
   const genMs = firstToken ? Date.now() - firstToken : 0;
   return {
     raw: extractJson(raw),
@@ -430,11 +455,98 @@ async function generateMlx(
   };
 }
 
-/** Lokales Modell (Ollama oder MLX) mit Live-Ausgabe */
+/**
+ * OpenCode lokal (`opencode serve`): je Anfrage eine eigene Sitzung ohne Werkzeuge, Antwort als JSON nach
+ * Schema. Live-Text kommt über den Ereignis-Strom; meldet OpenCode ein Limit („retry“, z. B. Gratis-Kontingent
+ * aufgebraucht), wird sofort abgebrochen statt stundenlang zu warten. Modell: „anbieter/modell“.
+ */
+async function generateOpencode(
+  cfg: Config["llm"], model: string, system: string, user: string, schema: object, onToken: (t: string) => void, _temperature = 0.4,
+  abort?: AbortSignal,
+): Promise<Generated> {
+  const started = Date.now();
+  const base = cfg.opencodeUrl;
+  const [providerID, ...rest] = model.split("/");
+  const modelID = rest.join("/");
+  if (!providerID || !modelID) throw new Error(`OpenCode: Modell „${model}“ bitte als „anbieter/modell“ angeben`);
+  const call = async (method: string, path: string, body?: unknown, signal?: AbortSignal) => {
+    const res = await fetch(`${base}${path}`, {
+      method, signal,
+      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).catch((err) => {
+      if (signal?.aborted) throw err;
+      throw new Error(`OpenCode nicht erreichbar unter ${base} – läuft „opencode serve --port 4096“? (${err})`);
+    });
+    if (!res.ok) throw new Error(`OpenCode: ${res.status} ${(await res.text()).slice(0, 300)}`);
+    return res;
+  };
+
+  const session = (await (await call("POST", "/session", { title: "Bühnenpost" })).json()) as { id: string };
+  const stop = new AbortController();
+  const signal = AbortSignal.any([stop.signal, AbortSignal.timeout(10 * 60_000), ...(abort ? [abort] : [])]);
+  let limit = "";
+  // Ereignisse dieser Sitzung mitlesen: Textstücke für die Live-Ausgabe, Status für Limits
+  const events = call("GET", "/event", undefined, signal).then(async (res) => {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for await (const chunk of res.body!) {
+      buffer += decoder.decode(chunk, { stream: true });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (!line.startsWith("data:")) continue;
+        const e = JSON.parse(line.slice(5)) as { type: string; properties?: { sessionID?: string; delta?: string; status?: { type: string; message?: string } } };
+        if (e.properties?.sessionID !== session.id) continue;
+        if (e.type === "session.next.text.delta" && e.properties.delta) onToken(e.properties.delta);
+        if (e.type === "session.status" && e.properties.status?.type === "retry") {
+          limit = e.properties.status.message ?? "OpenCode wiederholt die Anfrage";
+          stop.abort();
+        }
+      }
+    }
+  }).catch(() => undefined);
+
+  try {
+    const res = await call("POST", `/session/${session.id}/message`, {
+      model: { providerID, modelID },
+      system,
+      tools: { "*": false },
+      format: { type: "json_schema", schema },
+      parts: [{ type: "text", text: user }],
+    }, signal);
+    const out = (await res.json()) as {
+      info: { structured?: unknown; error?: { name?: string; data?: { message?: string } }; tokens?: { input?: number; output?: number } };
+      parts: { type: string; text?: string }[];
+    };
+    if (out.info.error) throw new Error(`OpenCode: ${out.info.error.data?.message ?? out.info.error.name ?? "Fehler"}`);
+    const text = out.parts.filter((p) => p.type === "text").map((p) => p.text ?? "").join("");
+    const raw = out.info.structured !== undefined ? JSON.stringify(out.info.structured) : extractJson(text);
+    if (!raw) throw new Error("Leere Antwort von OpenCode");
+    const ms = Date.now() - started;
+    const outputTokens = out.info.tokens?.output;
+    return {
+      raw,
+      stats: { ms, promptTokens: out.info.tokens?.input, outputTokens, tokensPerSec: outputTokens ? Math.round((outputTokens / ms) * 1e4) / 10 : undefined },
+    };
+  } catch (err) {
+    if (limit) throw new Error(`OpenCode: ${limit} – Anfrage abgebrochen`);
+    throw err;
+  } finally {
+    stop.abort();
+    await events;
+    // laufende Antwort stoppen und die Sitzung wieder entfernen, damit OpenCode nicht vollläuft
+    await call("POST", `/session/${session.id}/abort`).catch(() => undefined);
+    await call("DELETE", `/session/${session.id}`).catch(() => undefined);
+  }
+}
+
+/** Modell mit Live-Ausgabe: Ollama, MLX, OpenCode oder ChatGPT */
 const generateLocal = (
   cfg: Config["llm"], model: string, system: string, user: string, schema: object, onToken: (t: string) => void, temperature?: number,
   abort?: AbortSignal,
-) => (cfg.provider === "mlx" ? generateMlx : generateOllama)(cfg, model, system, user, schema, onToken, temperature, abort);
+) => (cfg.provider === "ollama" ? generateOllama : cfg.provider === "opencode" ? generateOpencode : generateOpenAi)(cfg, model, system, user, schema, onToken, temperature, abort);
 
 async function generateClaude(cfg: Config["llm"], system: string, user: string, schema: object, abort?: AbortSignal): Promise<Generated> {
   const started = Date.now();
@@ -464,7 +576,7 @@ async function generateClaude(cfg: Config["llm"], system: string, user: string, 
 export async function generateJson(
   cfg: Config["llm"], model: string, system: string, user: string, schema: object, abort?: AbortSignal,
 ): Promise<unknown> {
-  // MLX hält sich nicht immer an das Format – dann einmal neu fragen
+  // MLX & Co. halten sich nicht immer an das Format – dann einmal neu fragen
   for (let attempt = 0; ; attempt++) {
     const { raw } = cfg.provider === "claude"
       ? await generateClaude(cfg, system, user, schema, abort)
@@ -473,14 +585,14 @@ export async function generateJson(
     try {
       return JSON.parse(raw);
     } catch (err) {
-      if (cfg.provider !== "mlx" || attempt > 0) throw err;
+      if (cfg.provider === "ollama" || cfg.provider === "claude" || attempt > 0) throw err;
     }
   }
 }
 
 /** Modell laut Konfiguration (ohne Auswahl im Dashboard) */
 export const defaultModel = (cfg: Config["llm"]) =>
-  cfg.provider === "claude" ? cfg.claudeModel : cfg.provider === "mlx" ? cfg.mlxModel : cfg.ollamaModel;
+  ({ claude: cfg.claudeModel, mlx: cfg.mlxModel, opencode: cfg.opencodeModel, openai: cfg.openaiModel, ollama: cfg.ollamaModel })[cfg.provider];
 
 /** Stil-Regelwerk der Redaktion (Markdown), wird an die Schreib-Anweisung angehängt. */
 export function loadStyleGuide(path: string): string {

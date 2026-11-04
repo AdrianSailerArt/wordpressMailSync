@@ -57,12 +57,13 @@ function imapAccounts() {
 export type ImapAccount = ReturnType<typeof imapAccounts>[number];
 
 export type SeoPlugin = "yoast" | "rankmath" | "none";
-export const LLM_PROVIDERS = ["ollama", "mlx", "claude"] as const;
+export const LLM_PROVIDERS = ["ollama", "mlx", "opencode", "openai", "claude"] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
 function llmConfig(provider: LlmProvider) {
   // den Key liest das Anthropic-SDK selbst, hier nur auf Vorhandensein prüfen
   if (provider === "claude") env("ANTHROPIC_API_KEY");
+  if (provider === "openai") env("OPENAI_API_KEY");
   return {
     provider,
     ollamaUrl: env("OLLAMA_URL", "http://127.0.0.1:11434").replace(/\/+$/, ""),
@@ -70,6 +71,13 @@ function llmConfig(provider: LlmProvider) {
     // MLX auf Apple Silicon: `mlx_lm.server` mit OpenAI-kompatibler API
     mlxUrl: env("MLX_URL", "http://127.0.0.1:8080").replace(/\/+$/, ""),
     mlxModel: env("MLX_MODEL", "mlx-community/gemma-4-e4b-it-4bit"),
+    // OpenCode lokal (`opencode serve --port 4096`) – nutzt die in OpenCode eingerichteten Anbieter
+    opencodeUrl: env("OPENCODE_URL", "http://127.0.0.1:4096").replace(/\/+$/, ""),
+    opencodeModel: env("OPENCODE_MODEL", "opencode/big-pickle"),
+    // ChatGPT über die OpenAI-API (platform.openai.com), abgerechnet nach Tokens
+    openaiUrl: env("OPENAI_BASE_URL", "https://api.openai.com/v1").replace(/\/+$/, ""),
+    openaiKey: process.env.OPENAI_API_KEY?.trim() ?? "",
+    openaiModel: env("OPENAI_MODEL", "gpt-5.4-mini"),
     claudeModel: env("CLAUDE_MODEL", "claude-opus-5-5"),
     // Claude lässt sich im Dashboard nur mit API-Key wählen
     claudeKey: !!process.env.ANTHROPIC_API_KEY?.trim(),
