@@ -27,6 +27,11 @@ const Gebiet = z.object({ name: z.string(), lat: z.number(), lon: z.number(), ra
 const Quelle = z.discriminatedUnion("typ", [
   z.object({ typ: z.literal("vaddi"), id: z.string(), name: z.string(), url: z.string().url() }),
   z.object({ typ: z.literal("z7"), id: z.string(), name: z.string(), url: z.string().url() }),
+  // Location-Seite auf regioactive.de – für Locations ohne eigenes, lesbares Programm
+  z.object({
+    typ: z.literal("regioactive"), id: z.string(), name: z.string(), url: z.string().url(),
+    location: z.string(), ort: z.string(), land: z.string().length(2),
+  }),
   z.object({ typ: z.literal("ticketmaster"), id: z.string(), name: z.string() }),
   // beliebige Veranstalter-Seite, das Sprachmodell liest die Termine heraus
   z.object({

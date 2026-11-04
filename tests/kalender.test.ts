@@ -10,6 +10,7 @@ import type { KalenderConfig } from "../server/config.ts";
 import { geohash, mapTicketmaster } from "../server/kalender/ticketmaster.ts";
 import { filterVaddi, looksLikeMusic, parseDescription, parseVaddi } from "../server/kalender/vaddi.ts";
 import { parseZ7, parseZ7Detail } from "../server/kalender/z7.ts";
+import { parseRegioactive } from "../server/kalender/regioactive.ts";
 import { Store } from "../server/db.ts";
 
 const quellen = loadQuellen("kalender/quellen.json");
@@ -185,6 +186,9 @@ describe("Einzelne Quelle testen", () => {
     expect(combined.events.map((e) => e.uid)).toEqual(["jazzhaus:1", "vaddi:2"]);
     expect(combined.sources.map((s) => [s.id, s.sent])).toEqual([["jazzhaus", 1], ["vaddi", 1]]);
     expect(combined.dryRun).toBe(true);
+    // eine aus der Liste entfernte Quelle verschwindet auch aus dem gespeicherten Ergebnis
+    const withOld = kalender.combine({ ...prev, sources: [...prev.sources, { id: "pmc-erasme", name: "P.M.C.", found: 0, sent: 0, error: "403" }] }, partial);
+    expect(withOld.sources.map((s) => s.id)).toEqual(["jazzhaus", "vaddi"]);
   });
 });
 
@@ -303,6 +307,14 @@ describe("Konzertfabrik Z7", () => {
 });
 
 describe("Schneller abrufen", () => {
+  test("eingerückte Programme und überlange Zeilen gehen nicht verloren", () => {
+    const text = Array.from({ length: 400 }, (_, i) => ` * ${(i % 28) + 1}.11. Band ${i} ${"y".repeat(80)}`).join("\n") + "\n" + "z".repeat(30_000);
+    const parts = chunks(text, 12_000);
+    expect(parts.every((p) => p.length <= 12_000)).toBe(true);
+    expect(parts.join("\n").replace(/\n/g, "")).toBe(text.replace(/\n/g, ""));
+    expect(parts.some((p) => p.includes("Band 399"))).toBe(true);
+  });
+
   test("Abschnitte bleiben gleich, wenn oben ein Termin wegfällt", () => {
     const lines = Array.from({ length: 300 }, (_, i) => `${(i % 28) + 1}.11. Band Nummer ${i} live ${"x".repeat(60)}`);
     const before = chunks(lines.join("\n"), 12_000);
@@ -350,5 +362,30 @@ describe("Schneller abrufen", () => {
     expect(llmCalls).toBe(2); // nichts neu gefragt
     expect(second.events.length).toBe(first.events.length);
     expect(lines.some((l) => l.includes("1 von 1 Abschnitten aus dem Zwischenspeicher"))).toBe(true);
+  });
+});
+
+describe("regioactive", () => {
+  const q = { typ: "regioactive" as const, id: "mehlsack", name: "Mehlsack", url: "https://www.regioactive.de/location/x/mehlsack-FPMgKx4w7N", location: "Mehlsack", ort: "Emmendingen", land: "DE" };
+  const block = (id: string, title: string, iso: string, category: string, teaser = "") => `<div class="preview clickdiv relative rounded-md border bg-white" id="event-${id}">
+    <a href="/konzert/${id.toLowerCase()}-emmendingen-2026-${id}" title="x"><h3 class="text-base">${title}</h3></a>
+    <div class="mt-3 text-sm"><time datetime="${iso}">Sa., 7. Nov. 2026</time></div>
+    ${teaser ? `<div class="text-sm mt-3 text-gray-800">${teaser} ... <a class="more font-medium" href="/konzert/x">Mehr</a>&nbsp;&rsaquo;</div>` : ""}
+    <div class="mt-3 text-sm text-gray-500"> ${category} </div></div>`;
+
+  test("Termine mit Beginn, Kategorie, Link; Bands am + getrennt; Comedy fällt weg", () => {
+    const events = parseRegioactive(
+      block("h55PcjslK7", "Onkelznacht /Mehlsack", "2026-11-07T20:00:00+01:00", "Konzert") +
+      block("msJVYDTlzk", "Muggeseggel (Alemannischer Death-Metal) + Bitterness (Death-Thrash)", "2026-11-21T20:00:00+01:00", "Konzert (Metal)", "Zwei Bands") +
+      block("aaaaaaaaaa", "Comedy-Abend", "2026-11-22T00:00:00+01:00", "Comedy"),
+      q,
+    );
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      uid: "mehlsack:h55PcjslK7", date: "2026-11-07", time: "20:00", artists: ["Onkelznacht"], venue: "Mehlsack", city: "Emmendingen",
+      info: "Konzert", url: "https://www.regioactive.de/konzert/h55pcjslk7-emmendingen-2026-h55PcjslK7",
+    });
+    expect(events[1]!.artists).toEqual(["Muggeseggel", "Bitterness"]);
+    expect(events[1]!.info).toBe("Konzert (Metal) · Zwei Bands …");
   });
 });

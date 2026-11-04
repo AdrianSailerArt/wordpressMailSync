@@ -78,7 +78,7 @@ const days = computed(() => {
   return groups;
 });
 
-const TYPE_LABEL = { seite: "Sprachmodell", vaddi: "fester Parser", z7: "fester Parser", ticketmaster: "API" } as const;
+const TYPE_LABEL = { seite: "Sprachmodell", vaddi: "fester Parser", z7: "fester Parser", regioactive: "regioactive.de", ticketmaster: "API" } as const;
 
 const dayLabel = (date: string) =>
   new Date(`${date}T12:00:00`).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" });

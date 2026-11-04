@@ -226,7 +226,7 @@ export interface KalenderState {
   progress: { task: "abrufen" | "übertragen"; total: number; done: number; current: string; lines: string[]; startedAt: string; cancelling?: boolean; reading?: string } | null;
   nextRun: string | null;
   config: { schedule: string; auto: boolean; postStatus: string; ticketmaster: boolean; wpUrl: string };
-  sources: { id: string; name: string; typ: "seite" | "vaddi" | "z7" | "ticketmaster"; url: string }[];
+  sources: { id: string; name: string; typ: "seite" | "vaddi" | "z7" | "regioactive" | "ticketmaster"; url: string }[];
   last: KalenderResult | null;
 }
 

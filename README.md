@@ -148,8 +148,12 @@ Ticketmaster Discovery API ─────────────────�
 
 1. `bun run kalender:plugin` erzeugt `wordpress/konzertkalender.zip` → in WordPress unter
    *Plugins → Installieren → Plugin hochladen* hochladen und aktivieren.
-2. Auf einer Seite den Shortcode einfügen, z. B. `[konzertkalender tage="90" filter="ja"]`.
-   Weitere Möglichkeiten: `land="DE,CH"`, `ort="Freiburg,Basel"`, `location="Jazzhaus"`, `limit="200"`.
+2. Auf einer Seite einen **Shortcode-Block** mit `[konzertkalender tage="90" filter="ja"]` einfügen.
+   `filter="ja"` zeigt über der Liste eine **Textsuche** (Band, Künstler, Location, Infos – durchsucht das ganze
+   Jahr), eine Auswahl nach **Monat** und nach **Ort**. Weitere Möglichkeiten: `land="DE,CH"`,
+   `ort="Freiburg,Basel"`, `location="Jazzhaus"`, `limit="200"`.
+   Unter der Liste steht ein **Haftungshinweis** („Alle Angaben ohne Gewähr … maßgeblich sind immer die Angaben des
+   Veranstalters“), jeder Termin verlinkt „Infos & Tickets beim Veranstalter“. Eigener Text: `hinweis="…"`, ohne: `hinweis="aus"`.
    **Seitenleiste:** unter *Design → Widgets* das Widget „Konzertkalender“ hinzufügen (Anzahl, Zeitraum, Orte,
    Länder und Link „Alle Konzerte“ einstellbar) – oder überall kompakt per Shortcode:
    `[konzertkalender kompakt="ja" anzahl="8" link="/konzerte/"]`.

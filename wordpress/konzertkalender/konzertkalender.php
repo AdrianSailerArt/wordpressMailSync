@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Konzertkalender
  * Description: Konzerttermine aus der Region (Freiburg, Karlsruhe, Schweiz) – werden über die REST-API befüllt und per Shortcode [konzertkalender] als Liste angezeigt.
- * Version: 0.3.0
+ * Version: 0.4.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: konzertkalender
@@ -226,8 +226,17 @@ add_action('kk_cleanup', function () {
 
 /* ---------------------------------------------------------------- Anzeige */
 
+const KK_HINWEIS = 'Alle Angaben ohne Gewähr. Termine, Preise und Besetzungen können sich ändern – maßgeblich sind immer die Angaben des Veranstalters. Der Link bei jedem Termin führt zur Quelle.';
+
+/** Haftungshinweis unter der Liste: Standardtext, eigener Text oder „aus“. */
+function kk_hinweis($text, $short = false) {
+    if (in_array(strtolower(trim((string) $text)), ['aus', 'nein', '0', 'false'], true)) return '';
+    $t = trim((string) $text) !== '' ? $text : ($short ? 'Angaben ohne Gewähr – maßgeblich sind die Angaben des Veranstalters.' : KK_HINWEIS);
+    return sprintf('<p class="kk-hinweis">%s</p>', esc_html($t));
+}
+
 /** Kurze Liste der nächsten Konzerte – für die Seitenleiste. */
-function kk_render_compact($events, $more_url = '') {
+function kk_render_compact($events, $more_url = '', $hinweis = '') {
     ob_start();
     echo '<div class="konzertkalender kk-compact">';
     if (!$events) {
@@ -242,7 +251,7 @@ function kk_render_compact($events, $more_url = '') {
             if ($e['country'] && $e['country'] !== 'DE') $place .= ' (' . $e['country'] . ')';
             echo '<li class="kk-c-event">';
             printf('<time class="kk-c-date" datetime="%s">%s</time>', esc_attr($e['date']), esc_html($when));
-            if ($e['url'] !== '') printf('<a class="kk-c-artists" href="%s" target="_blank" rel="noopener nofollow">%s</a>', esc_url($e['url']), esc_html($artists));
+            if ($e['url'] !== '') printf('<a class="kk-c-artists" href="%s" target="_blank" rel="noopener nofollow" title="Infos &amp; Tickets beim Veranstalter">%s</a>', esc_url($e['url']), esc_html($artists));
             else printf('<strong class="kk-c-artists">%s</strong>', esc_html($artists));
             if ($e['status'] !== '') printf(' <span class="kk-status">%s</span>', esc_html($e['status']));
             if ($place !== '') printf('<span class="kk-c-place">%s</span>', esc_html($place));
@@ -251,36 +260,94 @@ function kk_render_compact($events, $more_url = '') {
         echo '</ul>';
     }
     if ($more_url !== '') printf('<a class="kk-c-more" href="%s">Alle Konzerte &rarr;</a>', esc_url($more_url));
+    echo kk_hinweis($hinweis, true);
     echo '</div>';
     return ob_get_clean();
 }
 
+/** Kleinbuchstaben ohne Akzente – damit „Zürich“ auch mit „zurich“ gefunden wird. */
+function kk_fold($text) {
+    $text = remove_accents((string) $text);
+    return function_exists('mb_strtolower') ? mb_strtolower($text) : strtolower($text);
+}
+
+/** Alle Suchwörter müssen in Künstlern, Titel, Location, Ort oder Infos vorkommen. */
+function kk_matches($e, $words) {
+    $hay = kk_fold(implode(' ', array_merge($e['artists'], [$e['title'], $e['venue'], $e['city'], $e['info']])));
+    foreach ($words as $w) if (strpos($hay, $w) === false) return false;
+    return true;
+}
+
+/** Übrige Parameter der Seite (z. B. ?page_id=…) – bleiben beim Filtern und Zurücksetzen erhalten. */
+function kk_keep_params() {
+    $keep = [];
+    foreach ($_GET as $k => $v) {
+        if (in_array($k, ['kk_q', 'kk_monat', 'kk_ort'], true) || !is_string($v)) continue;
+        $keep[sanitize_key($k)] = sanitize_text_field(wp_unslash($v));
+    }
+    return $keep;
+}
+
 /**
  * [konzertkalender tage="90" land="DE,CH" ort="Freiburg,Basel" location="Jazzhaus" limit="500" filter="ja"]
- * filter="ja" zeigt eine Auswahl nach Ort (über ?kk_ort=… in der Adresse).
+ * filter="ja" zeigt Suche, Monat und Ort (über ?kk_q=…&kk_monat=2026-12&kk_ort=… in der Adresse).
  * kompakt="ja" anzahl="8" link="/konzerte/" – kurze Liste der nächsten Konzerte, z. B. für die Seitenleiste.
+ * hinweis="…" eigener Haftungshinweis, hinweis="aus" blendet ihn aus.
  */
 function kk_shortcode($atts) {
-    $atts = shortcode_atts(['tage' => 90, 'land' => '', 'ort' => '', 'location' => '', 'quelle' => '', 'limit' => 500, 'filter' => '', 'kompakt' => '', 'anzahl' => 8, 'link' => ''], $atts, 'konzertkalender');
+    $atts = shortcode_atts(['tage' => 90, 'land' => '', 'ort' => '', 'location' => '', 'quelle' => '', 'limit' => 500, 'filter' => '', 'kompakt' => '', 'anzahl' => 8, 'link' => '', 'hinweis' => ''], $atts, 'konzertkalender');
     if (in_array(strtolower($atts['kompakt']), ['1', 'ja', 'true', 'yes'], true)) {
-        return kk_render_compact(kk_query(array_merge($atts, ['limit' => $atts['anzahl']])), $atts['link']);
+        return kk_render_compact(kk_query(array_merge($atts, ['limit' => $atts['anzahl']])), $atts['link'], $atts['hinweis']);
     }
-    $events = kk_query($atts);
     $show_filter = in_array(strtolower($atts['filter']), ['1', 'ja', 'true', 'yes'], true);
-    $chosen = isset($_GET['kk_ort']) ? sanitize_text_field(wp_unslash($_GET['kk_ort'])) : '';
+    $get = function ($k) { return isset($_GET[$k]) && is_string($_GET[$k]) ? sanitize_text_field(wp_unslash($_GET[$k])) : ''; };
+    $q = $show_filter ? $get('kk_q') : '';
+    $month = $show_filter && preg_match('/^\d{4}-\d{2}$/', $get('kk_monat')) ? $get('kk_monat') : '';
+    $city = $show_filter ? $get('kk_ort') : '';
+    $filtered = $q !== '' || $month !== '' || $city !== '';
+
+    // Für die Auswahl ein Jahr im Voraus laden; ohne Monat und Suche werden nur die nächsten `tage` Tage gezeigt
+    $days = (int) $atts['tage'];
+    $all = kk_query($show_filter ? array_merge($atts, ['tage' => max($days, 365), 'limit' => 2000]) : $atts);
+    $until = wp_date('Y-m-d', time() + $days * DAY_IN_SECONDS);
+    $words = array_values(array_filter(preg_split('/\s+/', kk_fold($q))));
+    $events = array_values(array_filter($all, function ($e) use ($month, $city, $words, $until, $q) {
+        if ($month !== '') {
+            if (substr($e['date'], 0, 7) !== $month) return false;
+        } elseif ($q === '' && $e['date'] > $until) {
+            return false; // eine Suche durchsucht das ganze Jahr
+        }
+        if ($city !== '' && $e['city'] !== $city) return false;
+        return !$words || kk_matches($e, $words);
+    }));
 
     ob_start();
     echo '<div class="konzertkalender">';
     if ($show_filter) {
-        $cities = array_unique(array_filter(array_map(function ($e) { return $e['city']; }, $events)));
+        $cities = array_unique(array_filter(array_map(function ($e) { return $e['city']; }, $all)));
         sort($cities, SORT_LOCALE_STRING);
-        echo '<form class="kk-filter" method="get"><label>Ort <select name="kk_ort" onchange="this.form.submit()"><option value="">alle</option>';
-        foreach ($cities as $c) printf('<option value="%1$s"%2$s>%1$s</option>', esc_attr($c), selected($c, $chosen, false));
-        echo '</select></label><noscript><button type="submit">Anzeigen</button></noscript></form>';
-        if ($chosen !== '') $events = array_values(array_filter($events, function ($e) use ($chosen) { return $e['city'] === $chosen; }));
+        $months = array_unique(array_map(function ($e) { return substr($e['date'], 0, 7); }, $all));
+        sort($months);
+        echo '<form class="kk-filter" method="get" role="search">';
+        foreach (kk_keep_params() as $k => $v) printf('<input type="hidden" name="%s" value="%s">', esc_attr($k), esc_attr($v));
+        printf('<label class="kk-f-search"><span>Suche</span><input type="search" name="kk_q" value="%s" placeholder="Band, Künstler, Location …"></label>', esc_attr($q));
+        printf('<label><span>Monat</span><select name="kk_monat" onchange="this.form.submit()"><option value="">nächste %d Tage</option>', $days);
+        foreach ($months as $m) printf('<option value="%s"%s>%s</option>', esc_attr($m), selected($m, $month, false), esc_html(date_i18n('F Y', strtotime($m . '-15'))));
+        echo '</select></label>';
+        echo '<label><span>Ort</span><select name="kk_ort" onchange="this.form.submit()"><option value="">alle Orte</option>';
+        foreach ($cities as $c) printf('<option value="%1$s"%2$s>%1$s</option>', esc_attr($c), selected($c, $city, false));
+        echo '</select></label>';
+        echo '<button type="submit">Suchen</button>';
+        if ($filtered) {
+            $page = get_permalink() ?: home_url('/');
+            printf('<a class="kk-f-reset" href="%s">Filter zurücksetzen</a>', esc_url(add_query_arg(kk_keep_params(), $page)));
+        }
+        echo '</form>';
+        if ($filtered) printf('<p class="kk-f-count">%d %s gefunden</p>', count($events), count($events) === 1 ? 'Konzert' : 'Konzerte');
     }
     if (!$events) {
-        echo '<p class="kk-empty">Zurzeit sind keine Konzerte eingetragen.</p></div>';
+        echo $filtered ? '<p class="kk-empty">Keine Konzerte für diese Auswahl.</p>' : '<p class="kk-empty">Zurzeit sind keine Konzerte eingetragen.</p>';
+        echo kk_hinweis($atts['hinweis']) . '</div>';
         return ob_get_clean();
     }
 
@@ -301,10 +368,12 @@ function kk_shortcode($atts) {
         if ($e['status'] !== '') printf(' <span class="kk-status">%s</span>', esc_html($e['status']));
         if ($place !== '') printf('<span class="kk-place">%s</span>', esc_html($place));
         if ($e['info'] !== '') printf('<span class="kk-info">%s</span>', nl2br(esc_html($e['info'])));
-        if ($e['url'] !== '') printf('<a class="kk-link" href="%s" target="_blank" rel="noopener nofollow">Infos &amp; Tickets</a>', esc_url($e['url']));
+        if ($e['url'] !== '') printf('<a class="kk-link" href="%s" target="_blank" rel="noopener nofollow">Infos &amp; Tickets beim Veranstalter</a>', esc_url($e['url']));
         echo '</li>';
     }
-    echo '</ul></div>';
+    echo '</ul>';
+    echo kk_hinweis($atts['hinweis']);
+    echo '</div>';
     return ob_get_clean();
 }
 
@@ -319,7 +388,16 @@ add_action('wp_head', function () {
 .konzertkalender .kk-place,.konzertkalender .kk-info{display:block;font-size:.92em}
 .konzertkalender .kk-info{opacity:.8}
 .konzertkalender .kk-link{font-size:.9em}
-.konzertkalender .kk-filter{margin-bottom:1em}
+.konzertkalender .kk-filter{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.6em 1em;margin:0 0 1.2em;padding:.9em 1em;border:1px solid rgba(127,127,127,.25);border-radius:6px}
+.konzertkalender .kk-filter label{display:flex;flex-direction:column;gap:.25em;font-size:.85em;margin:0}
+.konzertkalender .kk-filter label span{font-weight:600;opacity:.8}
+.konzertkalender .kk-filter .kk-f-search{flex:1 1 14em}
+.konzertkalender .kk-filter input,.konzertkalender .kk-filter select{width:100%;min-height:2.3em;margin:0;box-sizing:border-box}
+.konzertkalender .kk-filter button{min-height:2.3em;margin:0}
+.konzertkalender .kk-f-reset{font-size:.85em;align-self:center}
+.konzertkalender .kk-f-count{font-size:.9em;opacity:.75;margin:-.4em 0 .8em}
+.konzertkalender .kk-hinweis{margin-top:1.4em;font-size:.8em;opacity:.65;line-height:1.45}
+.kk-compact .kk-hinweis{margin-top:.8em;font-size:.72em}
 .kk-compact .kk-c-list{list-style:none;margin:0;padding:0}
 .kk-compact .kk-c-event{padding:.55em 0;border-bottom:1px solid rgba(127,127,127,.2);line-height:1.35}
 .kk-compact .kk-c-event:last-child{border-bottom:0}
@@ -336,7 +414,7 @@ add_action('wp_head', function () {
 
 /** Seitenleisten-Widget: die nächsten Konzerte, optional nach Ort/Land, mit Link zur vollen Liste. */
 class KK_Widget extends WP_Widget {
-    const DEFAULTS = ['title' => 'Konzerte', 'anzahl' => 8, 'tage' => 60, 'land' => '', 'ort' => '', 'link' => ''];
+    const DEFAULTS = ['title' => 'Konzerte', 'anzahl' => 8, 'tage' => 60, 'land' => '', 'ort' => '', 'link' => '', 'hinweis' => ''];
 
     public function __construct() {
         parent::__construct('konzertkalender', 'Konzertkalender', ['description' => 'Die nächsten Konzerte aus dem Konzertkalender']);
@@ -347,7 +425,7 @@ class KK_Widget extends WP_Widget {
         $events = kk_query(['tage' => $o['tage'], 'land' => $o['land'], 'ort' => $o['ort'], 'limit' => $o['anzahl']]);
         echo $args['before_widget'];
         if ($o['title'] !== '') echo $args['before_title'] . esc_html(apply_filters('widget_title', $o['title'], $instance, $this->id_base)) . $args['after_title'];
-        echo kk_render_compact($events, $o['link']);
+        echo kk_render_compact($events, $o['link'], $o['hinweis']);
         echo $args['after_widget'];
     }
 
@@ -360,6 +438,7 @@ class KK_Widget extends WP_Widget {
             'ort' => ['Nur diese Orte (Komma, leer = alle)', 'text'],
             'land' => ['Nur diese Länder, z. B. DE,CH (leer = alle)', 'text'],
             'link' => ['Link „Alle Konzerte“ (Seite mit [konzertkalender])', 'url'],
+            'hinweis' => ['Haftungshinweis (leer = Standard, „aus“ = keiner)', 'text'],
         ];
         foreach ($fields as $key => [$label, $type]) {
             printf(
@@ -377,6 +456,7 @@ class KK_Widget extends WP_Widget {
             'ort' => sanitize_text_field($new['ort'] ?? ''),
             'land' => strtoupper(sanitize_text_field($new['land'] ?? '')),
             'link' => esc_url_raw($new['link'] ?? ''),
+            'hinweis' => sanitize_text_field($new['hinweis'] ?? ''),
         ];
     }
 }

@@ -9,6 +9,7 @@ import { compare, prepare, type Abgleich, type WpEvent } from "./abgleich.ts";
 import { fetchSeite, type AskJson } from "./seite.ts";
 import { fetchTicketmaster } from "./ticketmaster.ts";
 import { fetchVaddi } from "./vaddi.ts";
+import { fetchRegioactive } from "./regioactive.ts";
 import { fetchZ7 } from "./z7.ts";
 
 export interface SourceResult {
@@ -109,6 +110,8 @@ export class Kalender {
         return fetchVaddi(q.url, today, quellen, abort);
       case "z7":
         return fetchZ7(q.url, today, quellen, abort);
+      case "regioactive":
+        return fetchRegioactive(q, today, quellen, abort);
       case "ticketmaster":
         if (!this.cfg.ticketmasterKey) throw new Error("TICKETMASTER_API_KEY fehlt");
         return (await fetchTicketmaster(this.cfg.ticketmasterKey, quellen.gebiet, quellen.ausschliessen, abort)).filter((e) => e.date >= today);
@@ -329,6 +332,9 @@ export class Kalender {
     if (!prev) return partial;
     const tested = new Set(partial.sources.map((s) => s.id));
     const order = this.sources().map((s) => s.id);
+    // Quellen, die inzwischen aus der Liste entfernt wurden, fallen weg
+    const known = (id: string) => order.includes(id);
+    prev = { ...prev, sources: prev.sources.filter((s) => known(s.id)), events: prev.events.filter((e) => known(e.source)) };
     const rank = (id: string) => (order.indexOf(id) + 1 || order.length + 1);
     const events = mergeDuplicates([...prev.events.filter((e) => !tested.has(e.source)), ...partial.events]
       .sort((a, b) => rank(a.source) - rank(b.source)));

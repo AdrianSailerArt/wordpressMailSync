@@ -73,7 +73,9 @@ export function pageText(html: string): string {
       { selector: "nav", format: "skip" },
       { selector: "footer", format: "skip" },
     ],
-  }).replace(/\n{3,}/g, "\n\n").trim();
+  })
+    // Einrückung, leere Aufzählungspunkte und Leerzeilen kosten das Modell nur Zeit
+    .split("\n").map((l) => l.trim()).filter((l) => l && !/^[*•·|-]+$/.test(l)).join("\n");
 }
 
 /** kleiner, schneller Hash (FNV-1a) */
@@ -84,20 +86,23 @@ const fnv = (s: string) => {
 };
 
 /**
- * An Absätzen geteilt, jedes Stück höchstens `size` Zeichen. Die Schnitte hängen vom Inhalt ab, nicht von der
+ * An Zeilen geteilt, jedes Stück höchstens `size` Zeichen, ohne dass Text verloren geht. Die Schnitte hängen vom Inhalt ab, nicht von der
  * Position: Fällt oben ein vergangener Termin weg, bleiben die übrigen Stücke gleich – und damit im Zwischenspeicher.
  */
 export function chunks(text: string, size = CHUNK, min = Math.min(MIN_CHUNK, size / 4)): string[] {
   const out: string[] = [];
   let current = "";
-  for (const part of text.split(/\n(?=\S)/)) {
-    if (current && current.length + part.length + 1 > size) {
+  // an jeder Zeile – viele Programmseiten rücken fast alles ein; überlange Zeilen werden geteilt, nie abgeschnitten
+  const lines = text.split("\n").flatMap((l) => (l.length > size ? l.match(new RegExp(`[\\s\\S]{1,${size}}`, "g"))! : [l]));
+  for (const line of lines) {
+    if (current && current.length + line.length + 1 > size) {
       out.push(current);
       current = "";
     }
-    current = current ? `${current}\n${part}` : part.slice(0, size);
-    // Schnitt nach etwa jedem achten Absatz, ausgewählt über dessen Inhalt
-    if (current.length >= min && fnv(part.trim()) % 8 === 0) {
+    current = current ? `${current}\n${line}` : line;
+    // Schnitt nach etwa jeder achten Zeile, ausgewählt über deren Inhalt
+    const key = line.trim();
+    if (key && current.length >= min && fnv(key) % 8 === 0) {
       out.push(current);
       current = "";
     }
