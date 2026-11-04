@@ -7,6 +7,7 @@ import type { ImageInfo, MailImages, VideoInfo } from "./images.ts";
 import { originalMail, renderMailHtml, type OriginalMail } from "./mail-view.ts";
 import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type ImageAttachment, type MailboxStatus, type PressMail } from "./mail.ts";
 import { cleanArticle, type Article } from "./rewrite.ts";
+import type { WpCategory } from "./wordpress.ts";
 
 /** Schnittstellen statt Klassen, damit die Tests Fakes einsetzen können. */
 export interface Deps {
@@ -19,6 +20,8 @@ export interface Deps {
   wordpress: {
     postsToday(): Promise<number>;
     slugExists(slug: string): Promise<boolean>;
+    /** Kategorien der Website fürs Dashboard (fehlt in der Demo) */
+    categories?(): Promise<WpCategory[]>;
     createPost(
       article: Article, featured?: ImageAttachment, inline?: ImageAttachment[], videos?: { video: VideoInfo; thumbnail: ImageAttachment | null }[],
     ): Promise<{ id: number; link: string }>;
@@ -228,6 +231,12 @@ export class Pipeline {
 
   preview(uid: number, refresh = false): Promise<Article> {
     return this.exclusive(async () => this.draftFor(await this.mustGet(uid), refresh));
+  }
+
+  /** Kategorien aus WordPress samt Zuordnung der Modell-Kategorien (WP_CATEGORIES) zu ihren Slugs */
+  async categories(): Promise<{ categories: WpCategory[]; defaults: Record<string, string> }> {
+    const categories = (await this.deps.wordpress.categories?.()) ?? [];
+    return { categories, defaults: this.cfg.wp.categorySlugs };
   }
 
   saveDraft(uid: number, article: Article): Article {

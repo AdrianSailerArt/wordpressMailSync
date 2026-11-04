@@ -12,6 +12,14 @@ const SEO_META_KEYS = {
 
 const ALL_STATUSES = "publish,future,draft,pending";
 
+export interface WpCategory {
+  id: number;
+  name: string;
+  slug: string;
+  parent: number;
+  count: number;
+}
+
 /** Heutiges Datum in der Zeitzone, z. B. "2026-11-02". */
 export const localDate = (timezone: string, date = new Date()) =>
   new Intl.DateTimeFormat("sv-SE", { timeZone: timezone }).format(date);
@@ -20,6 +28,7 @@ export class WordPress {
   private api: string;
   private auth: string;
   private me?: number;
+  private cats?: { at: number; list: Promise<WpCategory[]> };
 
   constructor(private cfg: Config["wp"], private timezone: string) {
     this.api = `${cfg.url}/wp-json/wp/v2`;
@@ -80,13 +89,36 @@ export class WordPress {
     }
   }
 
-  /** Kategorie über den konfigurierten Slug – Namen wie „News“ gibt es auf vielen Seiten mehrfach. */
-  private async categoryId(label: string): Promise<number> {
-    const slug = this.cfg.categorySlugs[label];
-    if (!slug) return this.termId("categories", label);
-    const found = (await (await this.req("GET", "categories", { query: { slug, _fields: "id" } })).json()) as { id: number }[];
-    if (!found[0]) throw new Error(`WordPress-Kategorie mit Slug „${slug}“ nicht gefunden (WP_CATEGORIES prüfen)`);
-    return found[0].id;
+  /** Alle Kategorien der Website (10 Minuten zwischengespeichert). */
+  categories(): Promise<WpCategory[]> {
+    if (!this.cats || Date.now() - this.cats.at > 600_000) {
+      const list = this.loadCategories();
+      list.catch(() => (this.cats = undefined));
+      this.cats = { at: Date.now(), list };
+    }
+    return this.cats.list;
+  }
+
+  private async loadCategories(): Promise<WpCategory[]> {
+    const all: WpCategory[] = [];
+    for (let page = 1; ; page++) {
+      const res = await this.req("GET", "categories", { query: { per_page: 100, page, orderby: "name", _fields: "id,name,slug,parent,count" } });
+      const list = (await res.json()) as WpCategory[];
+      all.push(...list.map((c) => ({ ...c, name: decodeHtml(c.name) })));
+      if (page >= Number(res.headers.get("X-WP-TotalPages") ?? 1)) return all;
+    }
+  }
+
+  /**
+   * Kategorie über den Slug – Namen wie „News“ gibt es auf vielen Seiten mehrfach. Akzeptiert den
+   * Slug selbst (Auswahl im Dashboard) oder eine Modell-Kategorie aus WP_CATEGORIES.
+   */
+  private async categoryId(labelOrSlug: string): Promise<number> {
+    const slug = this.cfg.categorySlugs[labelOrSlug] ?? labelOrSlug;
+    const found = (await this.categories()).find((c) => c.slug === slug);
+    if (found) return found.id;
+    if (this.cfg.categorySlugs[labelOrSlug]) throw new Error(`WordPress-Kategorie mit Slug „${slug}“ nicht gefunden (WP_CATEGORIES prüfen)`);
+    return this.termId("categories", labelOrSlug);
   }
 
   private async uploadImage(image: ImageAttachment, alt: string, caption: string): Promise<{ id: number; url: string }> {
@@ -129,7 +161,8 @@ export class WordPress {
       content,
       excerpt: article.excerpt,
       status: this.cfg.status,
-      categories: [await this.categoryId(article.category)],
+      // Auswahl im Dashboard, sonst die Kategorie des Modells
+      categories: [...new Set(await Promise.all((article.wp_categories.length ? article.wp_categories : [article.category]).map((c) => this.categoryId(c))))],
       tags: await Promise.all(article.tags.map((t) => this.termId("tags", t))),
     };
     const keys = this.cfg.seoPlugin === "none" ? undefined : SEO_META_KEYS[this.cfg.seoPlugin];

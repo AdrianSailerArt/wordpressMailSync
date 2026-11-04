@@ -126,6 +126,7 @@ const api = new Hono()
       },
     });
   })
+  .get("/wp/categories", async (c) => c.json(await pipeline.categories()))
   .get("/mails", async (c) => {
     const mails = await pipeline.listMails();
     return c.json({ mails, mailboxes: pipeline.mailboxStatus() });

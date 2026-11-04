@@ -44,6 +44,7 @@ function fakeArticle(mail: PressMail): Article {
     reason: "Demo",
     featured_image: "",
     inline_images: [],
+    wp_categories: [],
     seo_title: "",
     generated_by: "demo",
     title: tour ? "Nordlicht Kollektiv: „Weite“ Tour 2027 – alle Termine" : "Mira Sol: Neue Single „Glas“ erscheint am 14.11.",

@@ -57,10 +57,17 @@ Festival-Ankündigungen 2025/2026). Gilt für jeden automatisch erstellten Beitr
 
 ## Titel
 
-- Tour: `Ankündigung | Tour – BAND (Support: BAND2) – TOURNAME 2026`
-- Album: `Ankündigung | BAND – ALBUMTITEL | Album & Tour` (bzw. `| Album`)
-- Festival: `FESTIVAL 2026 – kurze Pointe (Jubiläum, Headliner …)`
-- Einzelkonzert: `BAND live in STADT 2026 – Konzert im CLUB angekündigt`
+- Der Titel beginnt mit dem **Band- oder Festivalnamen**, nicht mit einem Etikett.
+  **Kein festes Präfix** wie „Ankündigung |“, „Ankündigung:“ oder „News:“ – das Wort
+  „Ankündigung“ gehört nur in den Titel, wenn es dort etwas aussagt (z. B. eine überraschende
+  Rückkehr), und auch dann nicht vorne.
+- Abwechseln statt immer dasselbe Muster. Beispiele:
+  - Tour: `BAND – TOURNAME | Tour 2026`, `BAND kommen 2026 auf „TOURNAME“-Tour`,
+    `BAND: Tour 2026 mit BAND2 als Support`
+  - Album: `BAND – „ALBUMTITEL“ | Album & Tour` (bzw. `| Album`),
+    `BAND kündigen neues Album „ALBUMTITEL“ an`, `BAND: Neue Single „SONG“ aus dem kommenden Album`
+  - Festival: `FESTIVAL 2026 – kurze Pointe (Jubiläum, Headliner …)`
+  - Einzelkonzert: `BAND live in STADT 2026 – Konzert im CLUB`
 - Der **SEO-Titel** ist kürzer (max. 60 Zeichen), enthält Band + Anlass + Jahr und nie den
   Seitennamen – den hängt Yoast selbst an.
 

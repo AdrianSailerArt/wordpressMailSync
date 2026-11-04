@@ -11,6 +11,8 @@ export interface Article {
   excerpt: string;
   content_html: string;
   category: string;
+  /** Kategorie-Slugs aus WordPress; leer = Kategorie des Modells */
+  wp_categories: string[];
   tags: string[];
   image_credit: string;
   /** "" = automatisch (größtes Bild), "none" = kein Beitragsbild, sonst Bild-ID */
@@ -19,6 +21,20 @@ export interface Article {
   generated_by: string;
   /** fehlt = automatisch das erste Video, [] = keins, sonst gewählte YouTube-IDs */
   videos?: string[];
+}
+
+export interface WpCategory {
+  id: number;
+  name: string;
+  slug: string;
+  parent: number;
+  count: number;
+}
+
+export interface WpCategories {
+  categories: WpCategory[];
+  /** Modell-Kategorie (WP_CATEGORIES) → Slug */
+  defaults: Record<string, string>;
 }
 
 export interface VideoInfo {
@@ -263,6 +279,7 @@ export const api = {
   testPush: () => call<{ ok: true }>("POST", "/push/test"),
   models: () => call<ModelsResponse>("GET", "/llm/models"),
   setModel: (model: string) => call<{ current: string }>("PUT", "/llm/model", { model }),
+  wpCategories: () => call<WpCategories>("GET", "/wp/categories"),
   trace: (uid: number) => call<LlmTrace | null>("GET", `/mails/${uid}/trace`),
   kalender: () => call<KalenderState>("GET", "/kalender"),
   kalenderRun: (dryRun: boolean, only: string[] = []) =>

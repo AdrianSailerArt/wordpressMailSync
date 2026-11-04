@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, toRaw, watch } from "vue";
-import { api, type Article, type MailImages, type OriginalMail } from "../api";
+import { api, type Article, type MailImages, type OriginalMail, type WpCategories, type WpCategory } from "../api";
 import Icon from "./Icon.vue";
 import MailCompare from "./MailCompare.vue";
 import MailView from "./MailView.vue";
@@ -35,6 +35,44 @@ const showMeta = ref(false);
 watch(() => props.article, (a) => {
   draft.value = structuredClone(toRaw(a));
   tagsText.value = a.tags.join(", ");
+});
+
+// Kategorien kommen aus WordPress; ohne Verbindung (Demo) bleibt die Auswahl aus WP_CATEGORIES
+const wp = ref<WpCategories | null>(null);
+const wpError = ref("");
+api.wpCategories().then((r) => (wp.value = r)).catch((err) => (wpError.value = String(err.message ?? err)));
+
+/** Hauptkategorien mit ihren Unterkategorien, z. B. Musik › News, Reviews … */
+const categoryTree = computed(() => {
+  const list = wp.value?.categories ?? [];
+  // tiefere Ebenen mit Pfad, z. B. Media › „Comics / Graphic Novels › News“
+  const below = (id: number, prefix: string): { c: WpCategory; name: string }[] =>
+    list.filter((c) => c.parent === id).flatMap((c) => [{ c, name: prefix + c.name }, ...below(c.id, `${prefix}${c.name} › `)]);
+  return list.filter((c) => !c.parent || !list.some((p) => p.id === c.parent))
+    .map((top) => ({ top, children: below(top.id, "") }));
+});
+
+/** Gewählte Slugs: ohne eigene Auswahl die Kategorie des Modells */
+const selectedCategories = computed<string[]>(() => {
+  if (draft.value.wp_categories?.length) return draft.value.wp_categories;
+  const slug = wp.value?.defaults[draft.value.category] ?? draft.value.category;
+  return wp.value?.categories.some((c) => c.slug === slug) ? [slug] : [];
+});
+
+function toggleCategory(slug: string) {
+  const list = selectedCategories.value;
+  draft.value.wp_categories = list.includes(slug) ? list.filter((s) => s !== slug) : [...list, slug];
+}
+
+const categoryLabel = computed(() => {
+  const list = wp.value?.categories ?? [];
+  return selectedCategories.value.map((slug) => {
+    const c = list.find((x) => x.slug === slug);
+    if (!c) return slug;
+    const path = [c.name];
+    for (let p = list.find((x) => x.id === c.parent); p; p = list.find((x) => x.id === p!.parent)) path.unshift(p.name);
+    return path.join(" › ");
+  }).join(", ");
 });
 
 const tags = () => tagsText.value.split(",").map((t) => t.trim()).filter(Boolean);
@@ -110,14 +148,40 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
       <button class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200" @click="showMeta = !showMeta">
         <Icon name="chevron" :size="14" class="transition-transform" :class="showMeta && 'rotate-90'" />
         Slug, Kategorie, Tags, Auszug
+        <span v-if="categoryLabel" class="font-normal text-zinc-400">· {{ categoryLabel }}</span>
       </button>
       <div v-if="showMeta" class="grid gap-4 rounded-xl bg-zinc-950/[0.02] p-4 ring-1 ring-zinc-950/5 sm:grid-cols-2 dark:bg-white/[0.02] dark:ring-white/5">
         <div><label class="label">Slug</label><input v-model="draft.slug" class="field font-mono text-xs" /></div>
-        <div>
-          <label class="label">Kategorie</label>
+        <div v-if="!wp">
+          <label class="label">Kategorie <span v-if="wpError" class="font-normal text-zinc-400">WordPress nicht erreichbar</span></label>
           <select v-model="draft.category" class="field">
             <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
           </select>
+        </div>
+        <div v-else class="sm:col-span-2">
+          <label class="label">Kategorien <span class="font-normal text-zinc-400">aus WordPress · mehrere möglich</span></label>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div v-for="{ top, children } in categoryTree" :key="top.id">
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  class="cat-chip font-semibold"
+                  :class="selectedCategories.includes(top.slug) && 'cat-chip-on'"
+                  @click="toggleCategory(top.slug)"
+                >{{ top.name }}</button>
+                <button
+                  v-for="{ c, name } in children"
+                  :key="c.id"
+                  type="button"
+                  class="cat-chip"
+                  :class="selectedCategories.includes(c.slug) && 'cat-chip-on'"
+                  :title="`${top.name} › ${name} · ${c.count} Beiträge`"
+                  @click="toggleCategory(c.slug)"
+                >{{ name }}</button>
+              </div>
+            </div>
+          </div>
+          <p v-if="!selectedCategories.length" class="mt-2 text-xs text-amber-600">Keine Kategorie gewählt – WordPress nimmt dann „{{ draft.category }}“.</p>
         </div>
         <div class="sm:col-span-2"><label class="label">Tags <span class="font-normal text-zinc-400">mit Komma trennen</span></label><input v-model="tagsText" class="field" /></div>
         <div class="sm:col-span-2"><label class="label">Auszug</label><textarea v-model="draft.excerpt" rows="2" class="field resize-none" /></div>

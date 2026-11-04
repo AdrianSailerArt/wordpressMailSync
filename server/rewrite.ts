@@ -57,7 +57,8 @@ dürfen als kurzes Zitat übernommen werden, klar gekennzeichnet.
 Links. Erfinde nichts dazu – auch keine Vermutungen über Setlist, Stimmung oder \
 Nachfrage; was nicht in der Mail steht, lässt du weg. Relative Zeitangaben („ab Freitag“, \
 „nächste Woche“) übernimmst du wörtlich und rechnest sie nie in ein Datum um.
-- title: Beitragstitel im Stil der Redaktion (siehe Regelwerk), max. 90 Zeichen.
+- title: Beitragstitel im Stil der Redaktion (siehe Regelwerk), max. 90 Zeichen. Beginnt mit \
+Band- oder Festivalnamen, ohne Präfix wie „Ankündigung |“.
 - seo_title: eigener Titel für Suchmaschinen, max. 60 Zeichen, ohne Seitennamen.
 - SEO: Fokus-Keyword (meist „Künstler + Tour/Album + Jahr“) im seo_title, im ersten Absatz \
 und in einer Zwischenüberschrift. Meta-Description 120–155 \
@@ -89,6 +90,8 @@ export const ArticleSchema = z.object({
   excerpt: z.string().default(""),
   content_html: z.string().default(""),
   category: z.string().default(""),
+  // Kategorie-Slugs aus WordPress, im Dashboard gewählt – leer = `category` des Modells
+  wp_categories: z.array(z.string()).default([]),
   tags: z.array(z.string()).default([]),
   image_credit: z.string().default(""),
   // Bildauswahl aus dem Dashboard – nicht Teil der Modellantwort.
@@ -104,7 +107,7 @@ export const ArticleSchema = z.object({
 export type Article = z.infer<typeof ArticleSchema>;
 
 const FIELDS = (Object.keys(ArticleSchema.shape) as (keyof Article)[])
-  .filter((k) => !["featured_image", "inline_images", "generated_by", "videos"].includes(k));
+  .filter((k) => !["wp_categories", "featured_image", "inline_images", "generated_by", "videos"].includes(k));
 const JSON_SCHEMA = {
   type: "object",
   properties: Object.fromEntries(
