@@ -23,8 +23,35 @@ const article = ref<Article | null>(null);
 const original = ref<OriginalMail | null>(null);
 const images = ref<MailImages | null>(null);
 const filter = ref<"all" | "drafts">("all");
-const visible = computed(() => (filter.value === "drafts" ? mails.value.filter((m) => m.hasDraft) : mails.value));
-const draftCount = computed(() => mails.value.filter((m) => m.hasDraft).length);
+
+/** Gewähltes Postfach ("" = alle); bleibt im Browser gespeichert */
+const ACCOUNT_KEY = "inbox-account";
+const account = ref(readAccount());
+function readAccount() {
+  try {
+    return localStorage.getItem(ACCOUNT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+watch(account, (v) => {
+  try {
+    localStorage.setItem(ACCOUNT_KEY, v);
+  } catch {
+    // ohne Speicher gilt die Auswahl nur bis zum Neuladen
+  }
+});
+/** Zusammengefasste Mails zählen für jedes Postfach, in dem ein Exemplar liegt */
+const inAccount = (m: MailSummary, name: string) => !name || m.account === name || m.duplicates.some((d) => d.account === name);
+// gespeichertes Postfach gibt es nicht mehr (umbenannt/entfernt) → alle zeigen
+watch(mailboxes, (list) => {
+  if (account.value && !list.some((b) => b.name === account.value)) account.value = "";
+});
+const accountMails = computed(() => mails.value.filter((m) => inAccount(m, account.value)));
+const accountCount = (name: string) => mails.value.filter((m) => inAccount(m, name)).length;
+
+const visible = computed(() => (filter.value === "drafts" ? accountMails.value.filter((m) => m.hasDraft) : accountMails.value));
+const draftCount = computed(() => accountMails.value.filter((m) => m.hasDraft).length);
 const busy = ref<"" | "preview" | "publish" | "skip" | "save">("");
 const notice = ref("");
 const detail = ref<HTMLElement | null>(null);
@@ -42,6 +69,7 @@ async function load() {
     const target = props.openUid && mails.value.find((m) => m.uid === props.openUid);
     if (target) {
       filter.value = "drafts";
+      if (!inAccount(target, account.value)) account.value = "";
       emit("opened");
       select(target);
     }
@@ -152,7 +180,7 @@ onMounted(load);
       <div class="card-header">
         <div class="segmented">
           <button
-            v-for="[id, label, n] in ([['all', 'Alle', mails.length], ['drafts', 'Vorschläge', draftCount]] as const)"
+            v-for="[id, label, n] in ([['all', 'Alle', accountMails.length], ['drafts', 'Vorschläge', draftCount]] as const)"
             :key="id"
             :aria-pressed="filter === id"
             @click="filter = id"
@@ -164,6 +192,23 @@ onMounted(load);
           <Icon name="refresh" :size="14" :class="loading && 'animate-spin'" />Neu laden
         </button>
       </div>
+
+      <!-- Postfächer: nur eins anzeigen, um gezielt zu picken -->
+      <nav v-if="multi" class="flex gap-1 overflow-x-auto border-b border-zinc-950/5 px-3 py-2 dark:border-white/10" aria-label="Postfach">
+        <button
+          v-for="b in [{ name: '', label: 'Alle Postfächer', error: '' }, ...mailboxes.map((m) => ({ name: m.name, label: m.name, error: m.error ?? '' }))]"
+          :key="b.name"
+          class="btn btn-ghost btn-sm shrink-0"
+          :class="account === b.name && '!bg-brand-50 !text-brand-700 dark:!bg-brand-500/10 dark:!text-brand-300'"
+          :aria-pressed="account === b.name"
+          :title="b.error ? `nicht erreichbar: ${b.error}` : b.name ? `Nur Mails aus ${b.name}` : 'Mails aus allen Postfächern'"
+          @click="account = b.name"
+        >
+          <span v-if="b.error" class="size-1.5 rounded-full bg-amber-500" />
+          {{ b.label }}
+          <span class="tabular-nums opacity-60">{{ accountCount(b.name) }}</span>
+        </button>
+      </nav>
 
       <div v-if="failed.length || (duplicateCount && !loading)" class="space-y-2 border-b border-zinc-950/5 px-4 py-3 dark:border-white/10">
         <p v-for="f in failed" :key="f.name" class="alert alert-warn !px-2.5 !py-1.5 text-xs">
@@ -180,6 +225,7 @@ onMounted(load);
       <div v-else-if="!visible.length" class="px-4 py-12 text-center text-sm text-zinc-500">
         <Icon name="inbox" :size="28" class="mx-auto mb-2 text-zinc-300 dark:text-zinc-600" />
         {{ filter === "drafts" ? "Noch keine Vorschläge." : "Keine neuen Mails." }}
+        <template v-if="account"><br /><button class="mt-2 text-xs underline underline-offset-2" @click="account = ''">Alle Postfächer zeigen</button></template>
       </div>
       <ul v-else class="max-h-[45vh] divide-y xl:max-h-[calc(100dvh-14rem)] divide-zinc-950/5 overflow-y-auto dark:divide-white/5">
         <li v-for="m in visible" :key="m.uid">
@@ -199,8 +245,8 @@ onMounted(load);
               <span class="truncate">{{ m.sender.replace(/<.*>/, "").trim() || m.sender }}</span>
               <span class="ml-auto shrink-0 tabular-nums">{{ formatDate(m.date) }}</span>
             </div>
-            <div v-if="multi || m.duplicates.length" class="mt-1.5 flex flex-wrap gap-1">
-              <span v-if="multi" class="badge truncate" :title="`Postfach: ${m.account}`">{{ m.account }}</span>
+            <div v-if="(multi && !account) || m.duplicates.length" class="mt-1.5 flex flex-wrap gap-1">
+              <span v-if="multi && !account" class="badge truncate" :title="`Postfach: ${m.account}`">{{ m.account }}</span>
               <span
                 v-if="m.duplicates.length"
                 class="badge badge-sky"
