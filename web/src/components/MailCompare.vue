@@ -41,7 +41,7 @@ const kept = computed(() => {
     <div v-if="layout === 'split'" class="grid gap-4 md:grid-cols-2">
       <div v-for="side in (['removed', 'added'] as const)" :key="side" class="min-w-0">
         <p class="eyebrow mb-2">{{ side === "removed" ? "Original-Mail" : "Beitrag" }}</p>
-        <div class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-zinc-950/[0.015] p-4 text-sm leading-relaxed ring-1 ring-zinc-950/5 dark:bg-white/[0.02] dark:ring-white/10">
+        <div class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words border border-zinc-950/30 bg-zinc-950/[0.015] p-4 text-sm leading-relaxed dark:border-white/20 dark:bg-white/[0.02]">
           <template v-for="(p, i) in parts" :key="i">
             <span v-if="!p.added && !p.removed">{{ p.value }}</span>
             <mark v-else-if="side === 'removed' && p.removed" class="rounded-sm bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200">{{ p.value }}</mark>
@@ -51,7 +51,7 @@ const kept = computed(() => {
       </div>
     </div>
 
-    <div v-else class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-zinc-950/[0.015] p-4 text-sm leading-relaxed ring-1 ring-zinc-950/5 dark:bg-white/[0.02] dark:ring-white/10">
+    <div v-else class="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words border border-zinc-950/30 bg-zinc-950/[0.015] p-4 text-sm leading-relaxed dark:border-white/20 dark:bg-white/[0.02]">
       <template v-for="(p, i) in parts" :key="i">
         <!-- Leerzeichen anhängen, damit Gelöschtes nicht am folgenden Wort klebt -->
         <del v-if="p.removed" class="rounded-sm bg-rose-100 text-rose-900 decoration-rose-400 dark:bg-rose-950 dark:text-rose-200">{{ /\s$/.test(p.value) ? p.value : p.value + " " }}</del>

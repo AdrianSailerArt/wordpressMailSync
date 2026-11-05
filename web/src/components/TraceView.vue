@@ -43,7 +43,7 @@ const seconds = (s: TraceStage) => (s.stats ? `${(s.stats.ms / 1000).toFixed(1)}
       {{ trace.relevant ? "als Musik-News erkannt" : trace.reason }}
     </p>
 
-    <section v-for="(s, i) in trace.stages" :key="i" class="rounded-xl ring-1 ring-zinc-950/5 dark:ring-white/10">
+    <section v-for="(s, i) in trace.stages" :key="i" class="rounded-xl ring-1 ring-zinc-950/40 dark:ring-white/20">
       <header class="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-zinc-950/5 px-3 py-2 text-xs dark:border-white/10">
         <span class="font-medium">{{ s.stage === "check" ? "1" : "2" }} · {{ stageLabel(s.stage) }}</span>
         <span class="text-zinc-500">{{ formatDate(s.at) }}</span>

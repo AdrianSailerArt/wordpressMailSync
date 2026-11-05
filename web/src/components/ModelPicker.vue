@@ -80,13 +80,13 @@ onMounted(() => load());
     <template v-if="data">
       <ul
         v-if="data.models.length"
-        class="divide-y divide-zinc-950/5 overflow-hidden rounded-xl ring-1 ring-zinc-950/5 transition-opacity dark:divide-white/5 dark:ring-white/10"
+        class="divide-y divide-zinc-950/15 overflow-hidden rounded-xl ring-1 ring-zinc-950 transition-opacity dark:divide-white/5 dark:ring-white/10"
         :class="loading && 'opacity-50'"
       >
         <li v-for="m in data.models" :key="m.name">
           <button
             class="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-zinc-950/[0.025] disabled:cursor-default dark:hover:bg-white/[0.03]"
-            :class="isChosen(m.name) && 'bg-brand-50/60 dark:bg-brand-500/10'"
+            :class="isChosen(m.name) && 'bg-zinc-950/[0.05] dark:bg-white/[0.06]'"
             :disabled="!!saving || loading"
             @click="choose(m.name)"
           >

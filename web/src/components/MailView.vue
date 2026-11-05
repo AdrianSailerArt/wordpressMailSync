@@ -64,7 +64,7 @@ const problems = computed(() => (dates.value?.onlyArticle.length ?? 0) + (dates.
 <template>
   <div v-if="!original" class="space-y-3"><div v-for="n in 5" :key="n" class="skeleton h-3" /></div>
   <div v-else class="grid gap-4" :class="article && 'xl:grid-cols-[minmax(0,1fr)_18rem]'">
-    <div class="min-w-0 overflow-hidden rounded-xl ring-1 ring-zinc-950/5 dark:ring-white/10">
+    <div class="min-w-0 overflow-hidden rounded-xl ring-1 ring-zinc-950/40 dark:ring-white/20">
       <!-- Kopfzeilen -->
       <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 border-b border-zinc-950/5 bg-zinc-950/[0.02] px-4 py-3 text-xs dark:border-white/10 dark:bg-white/[0.02]">
         <dt class="text-zinc-500">Betreff</dt>

@@ -150,7 +150,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
         Slug, Kategorie, Tags, Auszug
         <span v-if="categoryLabel" class="font-normal text-zinc-400">· {{ categoryLabel }}</span>
       </button>
-      <div v-if="showMeta" class="grid gap-4 rounded-xl bg-zinc-950/[0.02] p-4 ring-1 ring-zinc-950/5 sm:grid-cols-2 dark:bg-white/[0.02] dark:ring-white/5">
+      <div v-if="showMeta" class="grid gap-4 border border-zinc-950/30 bg-zinc-950/[0.02] p-4 sm:grid-cols-2 dark:border-white/20 dark:bg-white/[0.02]">
         <div><label class="label">Slug</label><input v-model="draft.slug" class="field font-mono text-xs" /></div>
         <div v-if="!wp">
           <label class="label">Kategorie <span v-if="wpError" class="font-normal text-zinc-400">WordPress nicht erreichbar</span></label>
@@ -211,7 +211,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
         <figure v-for="img in images.images" :key="img.id" class="group relative">
           <button
             class="block aspect-square w-full overflow-hidden rounded-lg bg-zinc-100 ring-offset-2 ring-offset-white transition dark:bg-zinc-800 dark:ring-offset-zinc-900"
-            :class="thumbnailId === img.id ? 'ring-2 ring-brand-600 dark:ring-brand-400' : 'opacity-85 ring-1 ring-zinc-950/5 hover:opacity-100 dark:ring-white/10'"
+            :class="thumbnailId === img.id ? 'ring-2 ring-brand-600 dark:ring-brand-400' : 'opacity-85 ring-1 ring-zinc-950/40 hover:opacity-100 dark:ring-white/10'"
             :title="`Als Beitragsbild verwenden – ${img.width}×${img.height}, ${kb(img.bytes)}`"
             @click="setThumbnail(img.id)"
           >
@@ -237,7 +237,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
             v-for="v in images.videos"
             :key="v.id"
             class="flex items-center gap-3 rounded-xl p-2 text-left ring-1 transition"
-            :class="selectedVideos.includes(v.id) ? 'bg-brand-50/60 ring-brand-500 dark:bg-brand-500/10 dark:ring-brand-400' : 'ring-zinc-950/10 opacity-75 hover:opacity-100 dark:ring-white/10'"
+            :class="selectedVideos.includes(v.id) ? 'ring-2 ring-brand-600 dark:ring-brand-400' : 'ring-zinc-950/10 opacity-75 hover:opacity-100 dark:ring-white/10'"
             @click="toggleVideo(v.id)"
           >
             <span class="relative block aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
@@ -265,7 +265,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
     </section>
 
     <!-- Ansicht -->
-    <section class="overflow-hidden rounded-xl ring-1 ring-zinc-950/5 dark:ring-white/10">
+    <section class="overflow-hidden rounded-xl ring-1 ring-zinc-950/40 dark:ring-white/20">
       <div class="tabs bg-zinc-950/[0.02] dark:bg-white/[0.02]" role="tablist">
         <button v-for="v in views" :key="v.id" role="tab" :aria-selected="view === v.id" @click="view = v.id">
           {{ v.label }}
@@ -291,7 +291,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
     </section>
 
     <!-- Aktionen -->
-    <div class="sticky bottom-20 z-10 -mx-1 flex flex-wrap items-center gap-2 rounded-xl bg-white/90 px-3 py-2.5 shadow-lg ring-1 ring-zinc-950/5 backdrop-blur lg:bottom-4 dark:bg-zinc-900/90 dark:ring-white/10">
+    <div class="sticky bottom-20 z-10 -mx-1 flex flex-wrap items-center gap-2 border border-zinc-950 bg-white px-3 py-2.5 shadow-md lg:bottom-4 dark:border-white/40 dark:bg-zinc-900 dark:shadow-none">
       <span class="mr-auto flex items-center gap-1.5 text-xs" :class="dirty ? 'text-amber-700 dark:text-amber-400' : 'text-zinc-500'">
         <span v-if="dirty" class="size-1.5 rounded-full bg-amber-500" />
         {{ dirty ? "Ungespeicherte Änderungen" : limitReached ? "Richtwert für heute erreicht – Veröffentlichen geht trotzdem" : article.generated_by ? `geschrieben von ${article.generated_by}` : "" }}

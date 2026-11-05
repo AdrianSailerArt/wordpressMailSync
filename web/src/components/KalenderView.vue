@@ -316,8 +316,8 @@ onUnmounted(() => clearTimeout(timer));
         </div>
         <ul class="max-h-96 divide-y divide-zinc-950/5 overflow-y-auto xl:max-h-[calc(100dvh-12rem)] dark:divide-white/5">
           <li v-for="s in state.sources" :key="s.id">
-            <div class="relative px-4 py-3 transition-colors" :class="source === s.id ? 'bg-brand-50/70 dark:bg-brand-500/10' : ''">
-              <span v-if="source === s.id" class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-brand-600 dark:bg-brand-400" />
+            <div class="relative px-4 py-3 transition-colors" :class="source === s.id ? 'bg-zinc-950/[0.05] dark:bg-white/[0.06]' : ''">
+              <span v-if="source === s.id" class="absolute inset-y-0 left-0 w-1 bg-brand-600 dark:bg-brand-400" />
               <div class="flex items-center gap-2">
                 <button class="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-brand-700 dark:hover:text-brand-300" title="Nur Termine dieser Quelle zeigen" @click="source = source === s.id ? '' : s.id">
                   {{ s.name }}
@@ -377,16 +377,16 @@ onUnmounted(() => clearTimeout(timer));
         </div>
 
         <!-- Auswahl -->
-        <div v-if="abgleich && last" class="sticky top-16 z-10 mb-4 flex flex-wrap items-center gap-3 rounded-xl px-3 py-2 text-xs transition lg:top-2"
-          :class="selected.length ? 'bg-brand-600 text-white shadow-lg shadow-brand-600/20 dark:bg-brand-500' : 'bg-white/90 text-zinc-600 ring-1 ring-zinc-950/5 backdrop-blur dark:bg-zinc-900/90 dark:text-zinc-400 dark:ring-white/10'">
+        <div v-if="abgleich && last" class="sticky top-16 z-10 mb-4 flex flex-wrap items-center gap-3 border border-zinc-950 px-3 py-2 text-xs transition lg:top-2 dark:border-white/40"
+          :class="selected.length ? 'bg-brand-600 text-white shadow-md dark:bg-brand-500 dark:shadow-none' : 'bg-white text-zinc-700 dark:bg-zinc-900 dark:text-zinc-400'">
           <label class="flex items-center gap-2" :class="!visibleSelectable.length && 'opacity-50'">
             <input type="checkbox" :checked="allVisibleSelected" :disabled="!visibleSelectable.length" @change="toggleVisible" />
             Neue und geänderte in der Ansicht auswählen ({{ visibleSelectable.length }})
           </label>
           <template v-if="selected.length">
             <span class="ml-auto font-medium">{{ selected.length }} ausgewählt</span>
-            <button class="rounded-md px-2 py-1 font-medium hover:bg-white/15" @click="selected = []">Aufheben</button>
-            <button class="inline-flex items-center gap-1.5 rounded-md bg-white px-2.5 py-1 font-semibold text-brand-700 shadow-sm hover:bg-brand-50" :disabled="state.busy || starting" @click="transferSelected">
+            <button class="px-2 py-1 font-medium underline-offset-2 hover:underline" @click="selected = []">Aufheben</button>
+            <button class="inline-flex items-center gap-1.5 border border-zinc-950 bg-white px-2.5 py-1 font-semibold text-zinc-950 hover:bg-zinc-950 hover:text-white" :disabled="state.busy || starting" @click="transferSelected">
               <Icon name="upload" :size="12" />Ausgewählte übertragen
             </button>
           </template>
@@ -406,7 +406,7 @@ onUnmounted(() => clearTimeout(timer));
               <span class="text-xs text-zinc-500">{{ d.events.length }} {{ d.events.length === 1 ? "Termin" : "Termine" }}</span>
             </h3>
             <ul class="divide-y divide-zinc-950/5 dark:divide-white/5">
-              <li v-for="e in d.events" :key="e.uid" class="flex gap-3 px-4 py-3 transition-colors" :class="selected.includes(e.uid) && 'bg-brand-50/50 dark:bg-brand-500/5'">
+              <li v-for="e in d.events" :key="e.uid" class="flex gap-3 px-4 py-3 transition-colors" :class="selected.includes(e.uid) && 'bg-zinc-950/[0.05] dark:bg-white/[0.06]'">
                 <input
                   v-model="selected"
                   type="checkbox"

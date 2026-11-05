@@ -1,75 +1,170 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/*
+ * Look & Feel nach adriansailerart:
+ * Papiergrau, schwarze Haarlinien, harte Ecken, ein tiefes Bühnenrot,
+ * leicht gekippte Elemente mit versetztem Doppelrahmen.
+ */
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist.woff2") format("woff2-variations"), url("/fonts/Geist.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* Akzentfarbe: ein warmes Violett – Bühnenlicht */
-  --color-brand-50: oklch(0.969 0.016 293.756);
-  --color-brand-100: oklch(0.943 0.029 294.588);
-  --color-brand-200: oklch(0.894 0.057 293.283);
-  --color-brand-300: oklch(0.811 0.111 293.571);
-  --color-brand-400: oklch(0.702 0.183 293.541);
-  --color-brand-500: oklch(0.606 0.25 292.717);
-  --color-brand-600: oklch(0.541 0.281 293.009);
-  --color-brand-700: oklch(0.491 0.27 292.581);
-  --color-brand-800: oklch(0.432 0.232 292.759);
-  --color-brand-900: oklch(0.38 0.189 293.745);
-  --color-brand-950: oklch(0.283 0.141 291.089);
+  /* Grautöne der Website statt Tailwind-Zink – neutral, ohne Blaustich */
+  --color-zinc-50: #f0f0f0;
+  --color-zinc-100: #ececec;
+  --color-zinc-200: #d8d8d8;
+  --color-zinc-300: #c4c4c4;
+  --color-zinc-400: #8c8c8c;
+  --color-zinc-500: #5e5e5e;
+  --color-zinc-600: #4a4a4a;
+  --color-zinc-700: #383838;
+  --color-zinc-800: #2c2c2c;
+  --color-zinc-900: #1a1a1a;
+  --color-zinc-950: #000000;
+
+  /* Akzent: Bühnenrot #922625 */
+  --color-brand-50: #f8eceb;
+  --color-brand-100: #f1d5d4;
+  --color-brand-200: #f2a6a6;
+  --color-brand-300: #e67373;
+  --color-brand-400: #e83d3a;
+  --color-brand-500: #bf3230;
+  --color-brand-600: #922625;
+  --color-brand-700: #6e1d1b;
+  --color-brand-800: #5a1816;
+  --color-brand-900: #451211;
+  --color-brand-950: #2a0b0a;
+
+  --color-paper: #e4e4e4;
+  --color-paper-dark: #2c2c2c;
+  --color-ink: #000000;
+
+  /* Harte Ecken – nur Punkte und Pillen bleiben rund */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+
+  /* Weiche Schatten raus – Tiefe entsteht über Linien */
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: 4px 4px 0 0 var(--color-ink);
+  --shadow-lg: 6px 6px 0 0 var(--color-ink);
 }
 
 @layer base {
   html {
-    @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+    @apply bg-paper text-zinc-950 antialiased dark:bg-paper-dark dark:text-zinc-100;
     color-scheme: light dark;
-    font-feature-settings: "cv11", "ss01";
   }
   ::selection {
     @apply bg-brand-600 text-white;
   }
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-brand-500;
+    @apply outline-2 outline-offset-4 outline-brand-600 dark:outline-brand-400;
   }
   input[type="checkbox"] {
-    @apply size-4 rounded accent-brand-600;
+    @apply size-4 accent-brand-600;
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
   }
 }
 
 @layer components {
+  /* ---- Versetzter Doppelrahmen: das Markenzeichen der Website */
+  .offset-frame {
+    @apply relative;
+  }
+  .offset-frame::after {
+    content: "";
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    border: 1px solid var(--color-ink);
+    pointer-events: none;
+    transition: all 0.2s ease;
+    z-index: -1;
+  }
+  @media (prefers-color-scheme: dark) {
+    .offset-frame::after {
+      border-color: rgb(255 255 255 / 0.5);
+    }
+  }
+
   /* ---- Knöpfe */
   .btn {
-    @apply inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium whitespace-nowrap
-      text-zinc-700 ring-1 ring-zinc-950/10 bg-white shadow-xs transition
-      hover:bg-zinc-50 hover:text-zinc-900 active:translate-y-px
-      disabled:pointer-events-none disabled:opacity-45
-      dark:bg-zinc-900 dark:text-zinc-200 dark:ring-white/10 dark:hover:bg-zinc-800 dark:hover:text-white;
+    @apply relative inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 px-3.5 text-sm font-semibold whitespace-nowrap select-none
+      border border-zinc-950 bg-white text-zinc-950 transition-all duration-200
+      hover:bg-zinc-950 hover:text-white active:translate-y-px
+      disabled:pointer-events-none disabled:opacity-40
+      dark:border-white/70 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-white dark:hover:text-zinc-950;
   }
+  /* Hauptaktion: rot, gekippt, mit Versatzrahmen – wie auf der Website */
   .btn-primary {
-    @apply bg-brand-600 text-white ring-brand-700/60 shadow-sm shadow-brand-600/20
-      hover:bg-brand-500 hover:text-white
-      dark:bg-brand-500 dark:ring-brand-400/40 dark:hover:bg-brand-400;
+    @apply -rotate-1 border-zinc-950 bg-brand-600 text-white
+      hover:bg-brand-700 hover:text-white
+      dark:border-zinc-950 dark:bg-brand-500 dark:text-white dark:hover:bg-brand-600 dark:hover:text-white;
+  }
+  .btn-primary::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    bottom: 4px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    border: 1px solid var(--color-ink);
+    pointer-events: none;
+    transition: all 0.2s ease;
+  }
+  .btn-primary:hover::after,
+  .btn-primary:focus-visible::after {
+    left: 1px;
+    bottom: 1px;
+  }
+  @media (prefers-color-scheme: dark) {
+    .btn-primary::after {
+      border-color: rgb(255 255 255 / 0.6);
+    }
   }
   .btn-ghost {
-    @apply bg-transparent ring-0 shadow-none text-zinc-600 hover:bg-zinc-950/5
-      dark:bg-transparent dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-zinc-100;
+    @apply border-transparent bg-transparent text-zinc-700 hover:border-zinc-950 hover:bg-transparent hover:text-zinc-950
+      dark:border-transparent dark:bg-transparent dark:text-zinc-300 dark:hover:border-white/60 dark:hover:bg-transparent dark:hover:text-white;
   }
   .btn-danger {
-    @apply text-rose-700 hover:bg-rose-50 hover:text-rose-800 dark:text-rose-400 dark:hover:bg-rose-950/60 dark:hover:text-rose-300;
+    @apply text-brand-700 hover:border-brand-700 hover:bg-brand-700 hover:text-white
+      dark:text-brand-300 dark:hover:border-brand-500 dark:hover:bg-brand-500 dark:hover:text-white;
   }
   .btn-sm {
-    @apply h-7 gap-1.5 rounded-md px-2.5 text-xs;
+    @apply h-7 gap-1.5 px-2.5 text-xs;
   }
   .btn-icon {
     @apply size-9 px-0;
   }
 
-  /* ---- Flächen */
+  /* ---- Flächen: Blatt mit schwarzer Haarlinie */
   .card {
-    @apply rounded-xl bg-white shadow-xs ring-1 ring-zinc-950/5 dark:bg-zinc-900 dark:ring-white/10;
+    @apply border border-zinc-950 bg-white dark:border-white/40 dark:bg-zinc-900;
   }
   .card-header {
-    @apply flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-zinc-950/5 px-4 py-3 dark:border-white/10;
+    @apply flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-zinc-950 px-4 py-3 dark:border-white/30;
   }
   .card-body {
     @apply p-4;
@@ -77,95 +172,119 @@
 
   /* ---- Formulare */
   .field {
-    @apply block w-full rounded-lg bg-white px-3 py-2 text-sm text-zinc-900 shadow-xs ring-1 ring-zinc-950/10 outline-none transition
-      placeholder:text-zinc-400 focus:ring-2 focus:ring-brand-500
-      dark:bg-zinc-950 dark:text-zinc-100 dark:ring-white/10 dark:focus:ring-brand-400;
+    @apply block w-full border border-zinc-950 bg-white px-3 py-2 text-sm text-zinc-950 outline-none transition
+      placeholder:text-zinc-400 focus:border-brand-600 focus:ring-1 focus:ring-brand-600
+      dark:border-white/40 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-brand-400 dark:focus:ring-brand-400;
   }
   select.field {
     @apply pr-8;
   }
   .label {
-    @apply mb-1.5 flex items-center justify-between gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400;
+    @apply mb-1.5 flex items-center justify-between gap-2 text-[11px] font-bold tracking-[0.12em] text-zinc-950 uppercase dark:text-zinc-200;
   }
   .eyebrow {
-    @apply text-[11px] font-semibold tracking-wider text-zinc-500 uppercase dark:text-zinc-400;
+    @apply text-[11px] font-bold tracking-[0.12em] text-zinc-950 uppercase dark:text-zinc-200;
   }
 
-  /* ---- Etiketten */
+  /* ---- Etiketten: kleine Stempel */
   .badge {
-    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] leading-4 font-medium whitespace-nowrap
-      bg-zinc-100 text-zinc-600 ring-1 ring-inset ring-zinc-950/5 dark:bg-white/5 dark:text-zinc-400 dark:ring-white/10;
-  }
-  /* Auswählbare Kategorie im Artikel-Editor */
-  .cat-chip {
-    @apply rounded-full px-2.5 py-1 text-xs text-zinc-600 ring-1 ring-inset ring-zinc-950/10 transition
-      hover:bg-zinc-950/[0.03] dark:text-zinc-300 dark:ring-white/10 dark:hover:bg-white/5;
-  }
-  .cat-chip-on {
-    @apply bg-brand-600 text-white ring-brand-600 hover:bg-brand-500 dark:bg-brand-500 dark:text-white dark:ring-brand-500;
+    @apply inline-flex items-center gap-1 border border-zinc-950 bg-transparent px-1.5 py-px text-[10px] leading-4 font-bold tracking-wider whitespace-nowrap uppercase
+      text-zinc-950 dark:border-white/50 dark:text-zinc-200;
   }
   .badge-brand {
-    @apply bg-brand-50 text-brand-700 ring-brand-600/15 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-400/20;
+    @apply border-zinc-950 bg-brand-600 text-white dark:border-brand-400 dark:bg-brand-500 dark:text-white;
   }
   .badge-green {
-    @apply bg-emerald-50 text-emerald-700 ring-emerald-600/15 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/20;
+    @apply border-emerald-800 bg-emerald-50 text-emerald-900 dark:border-emerald-400/60 dark:bg-emerald-500/15 dark:text-emerald-200;
   }
   .badge-sky {
-    @apply bg-sky-50 text-sky-700 ring-sky-600/15 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/20;
+    @apply border-[#155a99] bg-[#e6f0fa] text-[#0e3e66] dark:border-[#4d97d9]/60 dark:bg-[#1e6fbf]/20 dark:text-[#80b7e6];
   }
   .badge-amber {
-    @apply bg-amber-50 text-amber-800 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/20;
+    @apply border-zinc-950 bg-[#ffbf00] text-zinc-950 dark:border-[#ffbf00]/60 dark:bg-[#ffbf00]/15 dark:text-[#ffd24d];
   }
   .badge-rose {
-    @apply bg-rose-50 text-rose-700 ring-rose-600/15 dark:bg-rose-500/10 dark:text-rose-300 dark:ring-rose-400/20;
+    @apply border-brand-700 bg-brand-50 text-brand-800 dark:border-brand-400/60 dark:bg-brand-500/15 dark:text-brand-200;
   }
 
-  /* ---- Hinweise */
+  /* Auswählbare Kategorie im Artikel-Editor */
+  .cat-chip {
+    @apply border border-zinc-950/40 px-2.5 py-1 text-xs font-medium text-zinc-700 transition
+      hover:border-zinc-950 hover:text-zinc-950 dark:border-white/30 dark:text-zinc-300 dark:hover:border-white dark:hover:text-white;
+  }
+  .cat-chip-on {
+    @apply border-zinc-950 bg-zinc-950 text-white hover:bg-zinc-800 hover:text-white
+      dark:border-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:hover:text-zinc-950;
+  }
+
+  /* ---- Hinweise: Linie links statt Pastellfläche */
   .alert {
-    @apply flex items-start gap-2.5 rounded-lg px-3.5 py-2.5 text-sm ring-1 ring-inset;
+    @apply flex items-start gap-2.5 border border-l-4 bg-white px-3.5 py-2.5 text-sm dark:bg-zinc-900;
   }
   .alert-error {
-    @apply bg-rose-50 text-rose-800 ring-rose-600/15 dark:bg-rose-500/10 dark:text-rose-200 dark:ring-rose-400/20;
+    @apply border-brand-600 text-brand-800 dark:border-brand-400 dark:text-brand-200;
   }
   .alert-warn {
-    @apply bg-amber-50 text-amber-900 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-400/20;
+    @apply border-zinc-950 border-l-[#ffbf00] text-zinc-950 dark:border-white/40 dark:border-l-[#ffbf00] dark:text-zinc-100;
   }
   .alert-ok {
-    @apply bg-emerald-50 text-emerald-800 ring-emerald-600/15 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-400/20;
+    @apply border-zinc-950 border-l-[#00b26b] text-zinc-950 dark:border-white/40 dark:border-l-[#00b26b] dark:text-zinc-100;
   }
   .alert-info {
-    @apply bg-brand-50 text-brand-900 ring-brand-600/15 dark:bg-brand-500/10 dark:text-brand-100 dark:ring-brand-400/20;
+    @apply border-zinc-950 border-l-[#1e6fbf] text-zinc-950 dark:border-white/40 dark:border-l-[#4d97d9] dark:text-zinc-100;
   }
 
   /* ---- Umschalter (zwei, drei Ansichten) */
   .segmented {
-    @apply inline-flex rounded-lg bg-zinc-950/5 p-0.5 text-xs dark:bg-white/5;
+    @apply inline-flex border border-zinc-950 text-xs dark:border-white/50;
   }
   .segmented > button {
-    @apply rounded-md px-2.5 py-1 font-medium text-zinc-600 transition hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white;
+    @apply cursor-pointer border-l border-zinc-950 px-2.5 py-1 font-semibold text-zinc-700 transition first:border-l-0
+      hover:bg-zinc-950/5 hover:text-zinc-950 dark:border-white/50 dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-white;
   }
   .segmented > button[aria-pressed="true"] {
-    @apply bg-white text-zinc-900 shadow-xs ring-1 ring-zinc-950/5 dark:bg-zinc-700 dark:text-white dark:ring-white/10;
+    @apply bg-zinc-950 text-white hover:bg-zinc-950 hover:text-white dark:bg-white dark:text-zinc-950 dark:hover:bg-white dark:hover:text-zinc-950;
   }
 
   /* ---- Reiter innerhalb einer Karte */
   .tabs {
-    @apply flex gap-1 overflow-x-auto border-b border-zinc-950/5 px-2 dark:border-white/10;
+    @apply flex gap-1 overflow-x-auto border-b border-zinc-950 px-2 dark:border-white/30;
   }
   .tabs > button {
-    @apply -mb-px shrink-0 border-b-2 border-transparent px-2.5 pt-2.5 pb-2 text-sm font-medium text-zinc-500 transition
-      hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white;
+    @apply -mb-px shrink-0 cursor-pointer border-b-[3px] border-transparent px-2.5 pt-2.5 pb-2 text-sm font-semibold text-zinc-500 transition
+      hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white;
   }
   .tabs > button[aria-selected="true"] {
-    @apply border-brand-600 text-zinc-900 dark:border-brand-400 dark:text-white;
+    @apply border-brand-600 text-zinc-950 dark:border-brand-400 dark:text-white;
   }
 
   /* ---- Leere Zustände und Ladeplatzhalter */
   .empty {
-    @apply flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-6 py-12 text-center text-sm text-zinc-500
-      dark:border-zinc-700 dark:text-zinc-400;
+    @apply flex flex-col items-center justify-center gap-2 border border-dashed border-zinc-950/50 px-6 py-12 text-center text-sm text-zinc-600
+      dark:border-white/30 dark:text-zinc-400;
   }
   .skeleton {
-    @apply animate-pulse rounded bg-zinc-200/70 dark:bg-zinc-800;
+    @apply animate-pulse bg-zinc-950/10 dark:bg-white/10;
+  }
+
+  /* ---- Seitentitel: gekippter Kasten mit Versatzrahmen (wie der Hero-Titel) */
+  .page-title {
+    @apply relative inline-block -rotate-1 border border-zinc-950 bg-white px-4 py-2 text-2xl leading-tight font-extrabold tracking-tight text-zinc-950 sm:text-3xl
+      dark:border-white/70 dark:bg-zinc-900 dark:text-white;
+  }
+  .page-title::after {
+    content: "";
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    width: calc(100% - 1px);
+    height: calc(100% - 1px);
+    border: 1px solid var(--color-ink);
+    pointer-events: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    .page-title::after {
+      border-color: rgb(255 255 255 / 0.4);
+    }
   }
 }

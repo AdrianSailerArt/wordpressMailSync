@@ -202,7 +202,7 @@ onMounted(load);
           v-for="b in [{ name: '', label: 'Alle Postfächer', error: '' }, ...mailboxes.map((m) => ({ name: m.name, label: m.name, error: m.error ?? '' }))]"
           :key="b.name"
           class="btn btn-ghost btn-sm shrink-0"
-          :class="account === b.name && '!bg-brand-50 !text-brand-700 dark:!bg-brand-500/10 dark:!text-brand-300'"
+          :class="account === b.name && '!bg-zinc-950 !text-white dark:!bg-white dark:!text-zinc-950'"
           :aria-pressed="account === b.name"
           :title="b.error ? `nicht erreichbar: ${b.error}` : b.name ? `Nur Mails aus ${b.name}` : 'Mails aus allen Postfächern'"
           @click="account = b.name"
@@ -234,10 +234,10 @@ onMounted(load);
         <li v-for="m in visible" :key="m.uid">
           <button
             class="relative w-full px-4 py-3 text-left transition-colors"
-            :class="selected?.uid === m.uid ? 'bg-brand-50/70 dark:bg-brand-500/10' : 'hover:bg-zinc-950/[0.025] dark:hover:bg-white/[0.03]'"
+            :class="selected?.uid === m.uid ? 'bg-zinc-950/[0.05] dark:bg-white/[0.06]' : 'hover:bg-zinc-950/[0.025] dark:hover:bg-white/[0.03]'"
             @click="select(m)"
           >
-            <span v-if="selected?.uid === m.uid" class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-brand-600 dark:bg-brand-400" />
+            <span v-if="selected?.uid === m.uid" class="absolute inset-y-0 left-0 w-1 bg-brand-600 dark:bg-brand-400" />
             <div class="flex items-start gap-2">
               <span class="line-clamp-2 min-w-0 flex-1 text-sm leading-snug" :class="m.prefilter ? 'font-medium text-zinc-900 dark:text-zinc-100' : 'text-zinc-400'">
                 {{ m.subject || "(kein Betreff)" }}

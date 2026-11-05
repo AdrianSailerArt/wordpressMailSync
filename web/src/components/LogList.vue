@@ -12,7 +12,7 @@ const labels: Record<LogEntry["kind"], [string, string, IconName]> = {
   suggested: ["Vorschlag", "bg-sky-50 text-sky-600 ring-sky-600/15 dark:bg-sky-500/10 dark:text-sky-300", "sparkles"],
   skipped: ["Übersprungen", "bg-zinc-100 text-zinc-500 ring-zinc-950/5 dark:bg-white/5 dark:text-zinc-400", "skip"],
   error: ["Fehler", "bg-rose-50 text-rose-600 ring-rose-600/15 dark:bg-rose-500/10 dark:text-rose-300", "alert"],
-  run: ["Lauf", "bg-brand-50 text-brand-600 ring-brand-600/15 dark:bg-brand-500/10 dark:text-brand-300", "play"],
+  run: ["Lauf", "bg-brand-600 text-white ring-zinc-950 dark:bg-brand-500 dark:text-white", "play"],
 };
 const loading = ref(true);
 
@@ -34,7 +34,7 @@ onMounted(async () => {
     <Icon name="history" :size="32" class="text-zinc-300 dark:text-zinc-600" />
     <p>Noch keine Einträge.</p>
   </div>
-  <ol v-else class="card max-w-4xl divide-y divide-zinc-950/5 overflow-hidden dark:divide-white/5">
+  <ol v-else class="card max-w-4xl divide-y divide-zinc-950/15 overflow-hidden dark:divide-white/5">
     <li v-for="e in entries" :key="e.id" class="flex gap-4 px-4 py-3.5 sm:px-5">
       <span class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset" :class="labels[e.kind][1]" :title="labels[e.kind][0]">
         <Icon :name="labels[e.kind][2]" :size="15" />
