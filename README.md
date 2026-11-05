@@ -256,8 +256,12 @@ Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen
 
 [`stil/regelwerk.md`](stil/regelwerk.md) beschreibt, wie die Redaktion schreibt (Ansprache,
 Einstieg, Aufbau je Meldungsart, Titelformate, Termine, Links). Es wurde aus Artikeln von
-tribe-online.de abgeleitet und wird jedem Schreibauftrag mitgegeben. Einfach bearbeiten und
-den Server neu starten; anderer Pfad über `STYLE_FILE`.
+tribe-online.de abgeleitet und wird jedem Schreibauftrag mitgegeben.
+
+Bearbeiten unter *Einstellungen → Stil-Regelwerk*: Die Änderungen gelten ab dem nächsten Entwurf, ohne
+Neustart. Gespeichert wird eine eigene Fassung in der Datenbank – die Datei bleibt unverändert als
+**Vorlage**. Der Editor zeigt die Unterschiede zur Vorlage, „Auf Vorlage zurücksetzen“ verwirft die eigene
+Fassung. Anderer Pfad für die Vorlage beim Start über `STYLE_FILE`.
 
 ## Projektstruktur
 

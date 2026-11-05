@@ -64,6 +64,20 @@ test("bei kaputtem JSON wird einmal neu versucht", async () => {
   expect(result.title).toBe("Band Tour 2027");
 });
 
+test("bearbeitetes Regelwerk gilt ab dem nächsten Entwurf, ohne Neustart", async () => {
+  let guide = "- Regel eins.";
+  const rewriter = new Rewriter(cfg, ["News"], { styleGuide: () => guide });
+  const spy = spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(reply(music)).mockResolvedValueOnce(reply(article))
+    .mockResolvedValueOnce(reply(music)).mockResolvedValueOnce(reply(article));
+  await rewriter.rewrite(mail);
+  expect(body(spy, 1).messages[0].content).toContain("Regel eins.");
+  guide = "- Regel zwei.";
+  await rewriter.rewrite(mail);
+  expect(body(spy, 3).messages[0].content).toContain("Regel zwei.");
+  expect(body(spy, 3).messages[0].content).not.toContain("Regel eins.");
+});
+
 test("Stil-Regelwerk wird an die Schreib-Anweisung angehängt", async () => {
   const dir = mkdtempSync(join(tmpdir(), "wms-stil-"));
   try {

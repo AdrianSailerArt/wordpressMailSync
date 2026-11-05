@@ -6,6 +6,7 @@ import Icon from "./Icon.vue";
 import MailAccounts from "./MailAccounts.vue";
 import ModelPicker from "./ModelPicker.vue";
 import PageHeader from "./PageHeader.vue";
+import RegelwerkEditor from "./RegelwerkEditor.vue";
 import SettingsSection, { type Field } from "./SettingsSection.vue";
 
 const props = defineProps<{ status: Status }>();
@@ -154,5 +155,7 @@ const exposed = computed(() => setup.value && !["127.0.0.1", "localhost", "::1"]
 
       <SettingsSection v-if="setup.kalender" title="Konzertkalender" icon="calendar" :setup="setup" :fields="f.kalender" @saved="onSaved" />
     </div>
+
+    <div class="xl:col-span-2"><RegelwerkEditor /></div>
   </div>
 </template>

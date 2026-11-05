@@ -105,6 +105,10 @@ export class Store {
     return this.db.query<{ value: string }, [string]>("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null;
   }
 
+  deleteSetting(key: string): void {
+    this.db.run("DELETE FROM settings WHERE key = ?", [key]);
+  }
+
   setSetting(key: string, value: string): void {
     this.db.query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, value);
   }

@@ -10,6 +10,7 @@ import { loadAccounts } from "./accounts.ts";
 import { applySetup, envDefaults, importEnv, loadSetup } from "./setup.ts";
 import { Mailboxes } from "./mail.ts";
 import { Pipeline } from "./pipeline.ts";
+import { Regelwerk } from "./regelwerk.ts";
 import { Push } from "./push.ts";
 import { Rewriter } from "./rewrite.ts";
 import { WordPress } from "./wordpress.ts";
@@ -39,7 +40,10 @@ export function createApp() {
   applyStoredProvider(cfg.llm, store);
   const push = new Push(store, cfg.server.dataDir);
   const events = new LlmEvents();
+  // Regelwerk: eigene Fassung aus dem Dashboard, sonst die Datei als Vorlage
+  const regelwerk = new Regelwerk(store, cfg.llm.styleFile);
   const rewriter = new Rewriter(cfg.llm, cfg.wp.categories, {
+    styleGuide: regelwerk.current,
     // im Dashboard gewähltes Modell, je Anbieter getrennt gespeichert
     model: () => store.getSetting(modelSetting(cfg.llm.provider)) ?? "",
     events,
@@ -58,5 +62,5 @@ export function createApp() {
         notifier: push,
         store,
       };
-  return { cfg, store, push, events, rewriter, pipeline: new Pipeline(cfg, deps), demo, mailboxes, accounts, defaults };
+  return { cfg, store, push, events, rewriter, pipeline: new Pipeline(cfg, deps), demo, mailboxes, accounts, defaults, regelwerk };
 }

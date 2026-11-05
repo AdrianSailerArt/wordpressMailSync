@@ -234,6 +234,10 @@ const api = new Hono()
     });
   })
   .get("/wp/categories", async (c) => c.json(await pipeline.categories()))
+  // Stil-Regelwerk: eigene Fassung bearbeiten, die Datei bleibt Vorlage
+  .get("/regelwerk", (c) => c.json(wiring.regelwerk.state()))
+  .put("/regelwerk", async (c) => c.json(wiring.regelwerk.save(((await c.req.json()) as { text: string }).text ?? "")))
+  .delete("/regelwerk", (c) => c.json(wiring.regelwerk.reset()))
   // Einrichtung: Website, WordPress, API-Keys – Geheimnisse verlassen den Server nie
   .get("/setup", (c) => c.json(publicSetup(cfg, kalenderCfg, loadSetup(store), accounts.length)))
   .put("/setup", async (c) => {

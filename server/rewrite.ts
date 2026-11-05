@@ -631,8 +631,16 @@ export const defaultModel = (cfg: Config["llm"]) =>
  * Ohne Art (oder „sonstiges“) gehen alle Aufbau-Abschnitte mit.
  */
 export function loadStyleGuide(path: string, art?: Meldungsart): string {
-  if (!path || !existsSync(path)) return "";
-  const sections = readFileSync(path, "utf8").trim().split(/^(?=## )/m);
+  return styleGuideFor(readStyleFile(path), art);
+}
+
+/** Regelwerk-Vorlage aus der Datei (leer, wenn es sie nicht gibt) */
+export const readStyleFile = (path: string) => (path && existsSync(path) ? readFileSync(path, "utf8") : "");
+
+/** Regelwerk-Text für eine Meldungsart: „## Aufbau: … (art)“-Abschnitte anderer Arten fallen weg */
+export function styleGuideFor(text: string, art?: Meldungsart): string {
+  if (!text.trim()) return "";
+  const sections = text.trim().split(/^(?=## )/m);
   const kept = sections.filter((section) => {
     if (section.startsWith("## Aufbau nach Art")) return false; // Hinweis für Menschen, nicht fürs Modell
     const own = section.match(/^## Aufbau:.*\((\w+)\)/)?.[1];
@@ -687,6 +695,8 @@ export interface RewriterOptions {
   events?: LlmEvents;
   /** wird mit dem vollständigen KI-Protokoll aufgerufen, sobald eine Mail fertig ist */
   onTrace?: (trace: LlmTrace) => void;
+  /** aktuelles Regelwerk (im Dashboard bearbeitbar) – sonst die Datei aus styleFile */
+  styleGuide?: () => string;
 }
 
 export class Rewriter {
@@ -707,12 +717,14 @@ export class Rewriter {
 
   private system(art?: Meldungsart): string {
     const key = art ?? "";
-    const builtFor = `${this.cfg.siteName}|${this.cfg.siteTone}|${this.categories.join(",")}`;
+    const guide = this.opts.styleGuide?.() ?? readStyleFile(this.cfg.styleFile);
+    // Regelwerk geändert (Dashboard) → Anweisungen neu bauen, ohne Neustart
+    const builtFor = `${this.cfg.siteName}|${this.cfg.siteTone}|${this.categories.join(",")}|${Bun.hash(guide)}`;
     if (builtFor !== this.builtFor) {
       this.systems.clear();
       this.builtFor = builtFor;
     }
-    if (!this.systems.has(key)) this.systems.set(key, this.base + loadStyleGuide(this.cfg.styleFile, art));
+    if (!this.systems.has(key)) this.systems.set(key, this.base + styleGuideFor(guide, art));
     return this.systems.get(key)!;
   }
 

@@ -252,6 +252,14 @@ export interface KalenderQuelle {
   land?: string;
 }
 
+/** Stil-Regelwerk: eigene Fassung oder die Vorlage aus stil/regelwerk.md */
+export interface RegelwerkState {
+  text: string;
+  template: string;
+  custom: boolean;
+  updatedAt: string | null;
+}
+
 /** Einstellungen, wie sie das Dashboard sieht – ohne Passwörter und Keys */
 export interface Setup {
   done: boolean;
@@ -387,6 +395,9 @@ export const api = {
   addLocation: (l: LocationInput) => call<KalenderQuelle>("POST", "/kalender/quellen", l),
   updateLocation: (id: string, l: LocationInput) => call<KalenderQuelle>("PUT", `/kalender/quellen/${encodeURIComponent(id)}`, l),
   /** id: beim Bearbeiten die eigene Quelle, damit sie nicht als „schon eingetragen“ gilt */
+  regelwerk: () => call<RegelwerkState>("GET", "/regelwerk"),
+  saveRegelwerk: (text: string) => call<RegelwerkState>("PUT", "/regelwerk", { text }),
+  resetRegelwerk: () => call<RegelwerkState>("DELETE", "/regelwerk"),
   setup: () => call<Setup>("GET", "/setup"),
   saveSetup: (s: SetupInput) => call<Setup>("PUT", "/setup", s),
   /** ohne Passwort: das gespeicherte */
