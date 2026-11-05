@@ -9,6 +9,9 @@ import { totalmem } from "node:os";
 import { createApp, modelSetting, providerReady } from "./app.ts";
 import { LLM_PROVIDERS, loadKalenderConfig, type LlmProvider } from "./config.ts";
 import { Kalender, type Auswahl, type KalenderResult } from "./kalender/sync.ts";
+import { addLocation, editQuellen, removeLocation, removeOrt, setOrt, updateLocation, type LocationInput } from "./kalender/locations.ts";
+import { erkennen } from "./kalender/erkennen.ts";
+import { loadQuellen } from "./kalender/events.ts";
 import { mailCsp } from "./mail-view.ts";
 import { ArticleSchema, defaultModel } from "./rewrite.ts";
 
@@ -308,6 +311,7 @@ const api = new Hono()
     nextRun: kalenderJob?.nextRun()?.toISOString() ?? null,
     config: { schedule: kalenderCfg.schedule, auto: kalenderCfg.auto, postStatus: kalenderCfg.postStatus, ticketmaster: !!kalenderCfg.ticketmasterKey, wpUrl: kalenderCfg.wp.url },
     sources: kalender.sources(),
+    orte: loadQuellen(kalenderCfg.file).orte,
     last: lastKalender(),
   }))
   .post("/kalender/run", (c) => {
@@ -316,6 +320,40 @@ const api = new Hono()
     return c.json({ started: true }, 202);
   })
   .post("/kalender/cancel", (c) => c.json({ cancelled: kalender.cancel() }))
+  // Locations (Quellen vom Typ „seite“ / „regioactive“) anlegen, ändern, löschen
+  .post("/kalender/quellen/erkennen", async (c) => {
+    const { url, id } = (await c.req.json()) as { url: string; id?: string };
+    return c.json(await erkennen(url, loadQuellen(kalenderCfg.file), id));
+  })
+  .post("/kalender/quellen", async (c) => {
+    const input = (await c.req.json()) as LocationInput;
+    return c.json(editQuellen(kalenderCfg.file, (q) => {
+      const { quellen, quelle } = addLocation(q, input);
+      return { quellen, result: quelle };
+    }), 201);
+  })
+  .put("/kalender/quellen/:id", async (c) => {
+    const input = (await c.req.json()) as LocationInput;
+    return c.json(editQuellen(kalenderCfg.file, (q) => {
+      const { quellen, quelle } = updateLocation(q, c.req.param("id"), input);
+      return { quellen, result: quelle };
+    }));
+  })
+  // Orte im Gebiet (Ort → Land) – Veranstalter wie Vaddi werden darauf beschränkt
+  .put("/kalender/orte", async (c) => {
+    const input = (await c.req.json()) as { name: string; land: string };
+    return c.json(editQuellen(kalenderCfg.file, (q) => {
+      const quellen = setOrt(q, input);
+      return { quellen, result: quellen.orte };
+    }));
+  })
+  .delete("/kalender/orte/:name", (c) =>
+    c.json(editQuellen(kalenderCfg.file, (q) => {
+      const quellen = removeOrt(q, c.req.param("name"));
+      return { quellen, result: quellen.orte };
+    })))
+  .delete("/kalender/quellen/:id", (c) =>
+    c.json(editQuellen(kalenderCfg.file, (q) => ({ quellen: removeLocation(q, c.req.param("id")), result: { ok: true } }))))
   // Vergleich des letzten Abrufs mit dem Bestand in WordPress (Dubletten, Änderungen, was wegfiele)
   .get("/kalender/abgleich", async (c) => {
     const last = lastKalender();

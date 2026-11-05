@@ -163,8 +163,13 @@ Ticketmaster Discovery API ─────────────────�
 5. Übertragen: `bun run kalender`. Täglich automatisch mit `KALENDER_AUTO=true` (Standard 6:30 Uhr,
    `KALENDER_SCHEDULE`), solange der Server läuft. Im Dashboard-Server auch über `POST /api/kalender/run`.
 
-**Quellen** stehen in [`kalender/quellen.json`](kalender/quellen.json): neue Club-Seite mit
-`"typ": "seite"`, Adresse, Location, Ort und Land eintragen – mehr braucht es nicht. Dort stehen auch das
+**Quellen** stehen in [`kalender/quellen.json`](kalender/quellen.json). Locations pflegst du am einfachsten im
+Dashboard unter *Konzertkalender → Quellen → + Location* (bearbeiten über den Stift): Adresse der Programm-Seite
+einfügen, das Dashboard ruft sie ab und erkennt, wie sie gelesen wird – regioactive.de mit dem festen Parser,
+alles andere mit dem Sprachmodell. Es zählt die Termine, warnt bei Seiten ohne Programm oder mit JavaScript,
+schlägt verlinkte Programm-Unterseiten vor und füllt Name, Ort und Land aus. Unter *Orte* pflegst du die Orte
+im Gebiet (für Vaddi). Von Hand geht es
+genauso: neue Club-Seite mit `"typ": "seite"`, Adresse, Location, Ort und Land eintragen. Dort stehen auch das
 Gebiet (Kreise für Ticketmaster), die Orte für Vaddi und Stichworte zum Ausschließen. Die Reihenfolge der
 Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen ergänzen nur fehlende Angaben.
 

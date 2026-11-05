@@ -172,8 +172,11 @@ export class Kalender {
   progress: KalenderProgress | null = null;
 
   /** Quellen aus der Liste, für die Anzeige */
-  sources(): { id: string; name: string; typ: Quelle["typ"]; url: string }[] {
-    return loadQuellen(this.cfg.file).quellen.map((q) => ({ id: q.id, name: q.name, typ: q.typ, url: "url" in q ? q.url : "https://developer.ticketmaster.com" }));
+  sources(): { id: string; name: string; typ: Quelle["typ"]; url: string; location?: string; ort?: string; land?: string }[] {
+    return loadQuellen(this.cfg.file).quellen.map((q) => ({
+      id: q.id, name: q.name, typ: q.typ, url: "url" in q ? q.url : "https://developer.ticketmaster.com",
+      ...("location" in q && { location: q.location, ort: q.ort, land: q.land }),
+    }));
   }
 
   private begin(task: KalenderProgress["task"], total: number, log?: (line: string) => void) {

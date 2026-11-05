@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "demo-api",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["DEMO=1", "KALENDER_FILE=/private/tmp/claude-501/-Users-adran-github-wordpressMailSync/0c5b8478-c2b3-4a25-a791-ee1e1788a01f/scratchpad/quellen.json", "PORT=3299", "DB_PATH=/private/tmp/claude-501/-Users-adran-github-wordpressMailSync/0c5b8478-c2b3-4a25-a791-ee1e1788a01f/scratchpad/demo.sqlite", "bun", "run", "server/index.ts"],
+      "port": 3299
+    },
+    {
+      "name": "demo-web",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["API_PORT=3299", "bunx", "--bun", "vite", "web", "--port", "5199"],
+      "port": 5199
+    }
+  ]
+}

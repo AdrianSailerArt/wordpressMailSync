@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { api, formatDate, type Abgleich, type EventState, type KalenderState, type KonzertEvent } from "../api";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { api, formatDate, type Abgleich, type EventState, type KalenderQuelle, type KalenderState, type KonzertEvent } from "../api";
 import Icon from "./Icon.vue";
+import LocationForm from "./LocationForm.vue";
+import OrteList from "./OrteList.vue";
 import PageHeader from "./PageHeader.vue";
 
 const state = ref<KalenderState | null>(null);
@@ -19,6 +21,32 @@ const checking = ref(false);
 const selected = ref<string[]>([]);
 const showRemovals = ref(false);
 const showWpDuplicates = ref(false);
+/** Location-Formular: „neu“ oder die id der bearbeiteten Quelle */
+const editing = ref<string | null>(null);
+const isLocation = (s: KalenderQuelle) => s.typ === "seite" || s.typ === "regioactive";
+/** Orte im Gebiet → Land, für Vorschläge im Formular */
+const orte = computed(() => state.value?.orte ?? {});
+/** welche Locations an einem Ort liegen – solche Orte lassen sich nicht entfernen */
+const usedBy = computed(() => {
+  const by: Record<string, string[]> = {};
+  for (const s of state.value?.sources ?? []) if (s.ort) (by[s.ort] ??= []).push(s.name);
+  return by;
+});
+/** linke Spalte: Quellen oder Orte */
+const panel = ref<"quellen" | "orte">("quellen");
+
+async function onLocationSaved(q: KalenderQuelle, probe: boolean) {
+  editing.value = null;
+  await load();
+  await nextTick();
+  document.getElementById(`quelle-${q.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  if (probe) dryRun([q.id]);
+}
+async function onLocationDeleted(id: string) {
+  editing.value = null;
+  if (source.value === id) source.value = "";
+  await load();
+}
 
 const last = computed(() => state.value?.last ?? null);
 const progress = computed(() => state.value?.progress ?? null);
@@ -309,20 +337,31 @@ onUnmounted(() => clearTimeout(timer));
     <div class="grid items-start gap-6 xl:grid-cols-[20rem_minmax(0,1fr)]">
       <!-- Quellen -->
       <aside class="card min-w-0 overflow-hidden xl:sticky xl:top-6">
-        <div class="card-header">
-          <h2 class="text-sm font-semibold">Quellen</h2>
-          <span class="text-xs text-zinc-500">{{ state.sources.length }}</span>
-          <button v-if="source" class="btn btn-ghost btn-sm ml-auto" @click="source = ''"><Icon name="x" :size="12" />alle zeigen</button>
+        <div class="tabs pr-3" role="tablist">
+          <button role="tab" :aria-selected="panel === 'quellen'" @click="panel = 'quellen'">Quellen <span class="text-xs font-normal text-zinc-500">{{ state.sources.length }}</span></button>
+          <button role="tab" :aria-selected="panel === 'orte'" @click="panel = 'orte'">Orte <span class="text-xs font-normal text-zinc-500">{{ Object.keys(orte).length }}</span></button>
+          <button v-if="panel === 'quellen'" class="btn btn-sm my-auto ml-auto" :disabled="editing === 'neu'" title="Club oder Veranstalter mit eigener Programm-Seite hinzufügen" @click="editing = 'neu'">
+            <Icon name="plus" :size="12" />Location
+          </button>
         </div>
+        <OrteList v-if="panel === 'orte'" :orte="orte" :used-by="usedBy" @changed="load" />
+        <template v-else>
+        <div v-if="source" class="flex items-center gap-2 border-b border-zinc-950/15 px-4 py-2 text-xs dark:border-white/10">
+          <span class="min-w-0 flex-1 truncate">Nur <b>{{ sourceName(source) }}</b></span>
+          <button class="btn btn-ghost btn-sm" @click="source = ''"><Icon name="x" :size="12" />alle zeigen</button>
+        </div>
+        <LocationForm v-if="editing === 'neu'" :orte="orte" :busy="state.busy || starting" @saved="onLocationSaved" @deleted="onLocationDeleted" @close="editing = null" />
         <ul class="max-h-96 divide-y divide-zinc-950/5 overflow-y-auto xl:max-h-[calc(100dvh-12rem)] dark:divide-white/5">
-          <li v-for="s in state.sources" :key="s.id">
-            <div class="relative px-4 py-3 transition-colors" :class="source === s.id ? 'bg-zinc-950/[0.05] dark:bg-white/[0.06]' : ''">
+          <li v-for="s in state.sources" :id="`quelle-${s.id}`" :key="s.id">
+            <LocationForm v-if="editing === s.id" :quelle="s" :orte="orte" :busy="state.busy || starting" @saved="onLocationSaved" @deleted="onLocationDeleted" @close="editing = null" />
+            <div v-else class="relative px-4 py-3 transition-colors" :class="source === s.id ? 'bg-zinc-950/[0.05] dark:bg-white/[0.06]' : ''">
               <span v-if="source === s.id" class="absolute inset-y-0 left-0 w-1 bg-brand-600 dark:bg-brand-400" />
               <div class="flex items-center gap-2">
                 <button class="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-brand-700 dark:hover:text-brand-300" title="Nur Termine dieser Quelle zeigen" @click="source = source === s.id ? '' : s.id">
                   {{ s.name }}
                 </button>
-                <a :href="s.url" target="_blank" class="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title="Seite öffnen"><Icon name="external" :size="13" /></a>
+                <button v-if="isLocation(s)" class="text-zinc-400 hover:text-zinc-950 dark:hover:text-white" title="Location bearbeiten" @click="editing = s.id"><Icon name="pencil" :size="13" /></button>
+                <a :href="s.url" target="_blank" class="text-zinc-400 hover:text-zinc-950 dark:hover:text-white" title="Seite öffnen"><Icon name="external" :size="13" /></a>
               </div>
               <template v-for="r in [last?.sources.find((x) => x.id === s.id)]" :key="s.id + 'r'">
                 <p v-if="r?.error" class="mt-1 line-clamp-2 break-words text-xs text-rose-600 dark:text-rose-400" :title="r.error">{{ r.error }}</p>
@@ -356,6 +395,7 @@ onUnmounted(() => clearTimeout(timer));
             </div>
           </li>
         </ul>
+        </template>
       </aside>
 
       <!-- Termine -->

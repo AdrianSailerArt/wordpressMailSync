@@ -245,12 +245,44 @@ export interface Abgleich {
   wpDuplicates: [KonzertEvent & WpRef, KonzertEvent & WpRef][];
 }
 
+export interface KalenderQuelle {
+  id: string;
+  name: string;
+  typ: "seite" | "vaddi" | "z7" | "regioactive" | "ticketmaster";
+  url: string;
+  /** nur bei Locations (seite, regioactive) */
+  location?: string;
+  ort?: string;
+  land?: string;
+}
+
+/** Location anlegen oder ändern – Typ ergibt sich aus der Adresse */
+export interface LocationInput {
+  name: string;
+  url: string;
+  location: string;
+  ort: string;
+  land: string;
+}
+
+/** Was die Prüfung einer Programm-Seite ergibt (ohne Sprachmodell) */
+export interface Erkennung {
+  typ: "seite" | "regioactive";
+  urteil: "gut" | "unsicher" | "ungeeignet";
+  hinweis: string;
+  termine: number;
+  vorschlag: { name?: string; ort?: string; land?: string };
+  programmLinks: { text: string; url: string }[];
+}
+
 export interface KalenderState {
   busy: boolean;
   progress: { task: "abrufen" | "übertragen"; total: number; done: number; current: string; lines: string[]; startedAt: string; cancelling?: boolean; reading?: string } | null;
   nextRun: string | null;
   config: { schedule: string; auto: boolean; postStatus: string; ticketmaster: boolean; wpUrl: string };
-  sources: { id: string; name: string; typ: "seite" | "vaddi" | "z7" | "regioactive" | "ticketmaster"; url: string }[];
+  sources: KalenderQuelle[];
+  /** Orte im Gebiet → Land */
+  orte: Record<string, string>;
   last: KalenderResult | null;
 }
 
@@ -298,6 +330,13 @@ export const api = {
   kalenderAbgleich: () => call<Abgleich>("GET", "/kalender/abgleich"),
   /** nichts angegeben: alle Termine (ersetzt die Quellen) · uids: nur diese ergänzen · sources: nur diese Quellen ersetzen */
   kalenderTransfer: (sel: { uids?: string[]; sources?: string[] } = {}) => call<{ started: true }>("POST", "/kalender/transfer", sel),
+  addLocation: (l: LocationInput) => call<KalenderQuelle>("POST", "/kalender/quellen", l),
+  updateLocation: (id: string, l: LocationInput) => call<KalenderQuelle>("PUT", `/kalender/quellen/${encodeURIComponent(id)}`, l),
+  /** id: beim Bearbeiten die eigene Quelle, damit sie nicht als „schon eingetragen“ gilt */
+  erkennen: (url: string, id?: string) => call<Erkennung>("POST", "/kalender/quellen/erkennen", { url, id }),
+  setOrt: (name: string, land: string) => call<Record<string, string>>("PUT", "/kalender/orte", { name, land }),
+  deleteOrt: (name: string) => call<Record<string, string>>("DELETE", `/kalender/orte/${encodeURIComponent(name)}`),
+  deleteLocation: (id: string) => call<{ ok: true }>("DELETE", `/kalender/quellen/${encodeURIComponent(id)}`),
 };
 
 export const formatDate = (iso: string | null) =>

@@ -170,13 +170,18 @@ export function toEvents(raw: unknown, q: Seite, text: string, today: string, au
   });
 }
 
-/** Mindestens drei Datumsangaben wie „14.11.“, „14 ∫ 11“ oder „14. November“ – dann stehen dort Termine. */
-export function looksLikeProgram(text: string): boolean {
-  const t = text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+/** Datumsangaben wie „14.11.“, „14 ∫ 11“ oder „14. November“ im Text zählen. */
+export function countDates(text: string): number {
+  const t = text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    // Uhrzeiten („20:00“, „19.30 Uhr“) sind keine Datumsangaben
+    .replace(/\b\d{1,2}:\d{2}\b|\b\d{1,2}\.\d{2}\s*uhr\b/g, " ");
   const numeric = t.match(/(^|[^0-9])\d{1,2}\s*[^0-9a-z\s]{1,2}\s*\d{1,2}([^0-9]|$)/g)?.length ?? 0;
   const named = t.match(new RegExp(`\\b\\d{1,2}\\.?\\s*(${MONTHS.flat().join("|")})\\b`, "g"))?.length ?? 0;
-  return numeric + named >= 3;
+  return numeric + named;
 }
+
+/** Mindestens drei Datumsangaben – dann stehen dort Termine. */
+export const looksLikeProgram = (text: string): boolean => countDates(text) >= 3;
 
 export async function fetchSeite(q: Seite, html: string, today: string, ausschliessen: string[], ask: AskJson): Promise<KonzertEvent[]> {
   const text = pageText(html);
