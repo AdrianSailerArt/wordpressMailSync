@@ -13,9 +13,27 @@ import { addLocation, editQuellen, removeLocation, removeOrt, setOrt, updateLoca
 import { erkennen } from "./kalender/erkennen.ts";
 import { loadQuellen } from "./kalender/events.ts";
 import { mailCsp } from "./mail-view.ts";
+import {
+  addAccount, guessServer, removeAccount, saveAccounts, testConnection, toPublic, updateAccount,
+  type AccountInput, type MailAccount,
+} from "./accounts.ts";
 import { ArticleSchema, defaultModel } from "./rewrite.ts";
 
-const { cfg, store, push, events, rewriter, pipeline } = createApp();
+const wiring = createApp();
+const { cfg, store, push, events, rewriter, pipeline, mailboxes } = wiring;
+
+/** Postfächer – im Dashboard gepflegt, gespeichert in der Datenbank */
+let accounts = wiring.accounts;
+function changeAccounts(next: MailAccount[]) {
+  saveAccounts(store, next);
+  accounts = next;
+  mailboxes?.setAccounts(next);
+  return publicAccounts();
+}
+const publicAccounts = () => {
+  const errors = new Map(pipeline.mailboxStatus().map((m) => [m.nr, m.error]));
+  return accounts.map((a) => ({ ...toPublic(a), error: errors.get(a.nr) }));
+};
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const at = (cron: Cron | null) => cron?.nextRun()?.toLocaleString("de-DE", { timeZone: cfg.limits.timezone }) ?? "–";
@@ -222,6 +240,20 @@ const api = new Hono()
     });
   })
   .get("/wp/categories", async (c) => c.json(await pipeline.categories()))
+  // Postfächer anlegen, ändern, löschen – Passwörter verlassen den Server nie
+  .get("/mail/accounts", (c) => c.json(publicAccounts()))
+  .post("/mail/accounts", async (c) => c.json(changeAccounts(addAccount(store, accounts, (await c.req.json()) as AccountInput)), 201))
+  .put("/mail/accounts/:nr", async (c) =>
+    c.json(changeAccounts(updateAccount(accounts, Number(c.req.param("nr")), (await c.req.json()) as AccountInput))))
+  .delete("/mail/accounts/:nr", (c) => c.json(changeAccounts(removeAccount(store, accounts, Number(c.req.param("nr"))))))
+  // IMAP-Server zur Mail-Adresse vorschlagen
+  .post("/mail/accounts/erkennen", async (c) => c.json(await guessServer(((await c.req.json()) as { email: string }).email)))
+  // Verbindung prüfen, ohne zu speichern – leeres Passwort: das gespeicherte des Postfachs `nr`
+  .post("/mail/accounts/test", async (c) => {
+    const body = (await c.req.json()) as AccountInput & { nr?: number };
+    const password = body.password || accounts.find((a) => a.nr === body.nr)?.password || "";
+    return c.json(await testConnection({ host: body.host, port: Number(body.port) || 993, user: body.user, password, folder: body.folder || "INBOX" }));
+  })
   .get("/mails", async (c) => {
     const mails = await pipeline.listMails();
     return c.json({ mails, mailboxes: pipeline.mailboxStatus() });

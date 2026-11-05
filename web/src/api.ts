@@ -256,6 +256,23 @@ export interface KalenderQuelle {
   land?: string;
 }
 
+/** Postfach, wie es das Dashboard sieht – das Passwort bleibt auf dem Server */
+export interface MailAccount {
+  nr: number;
+  name: string;
+  user: string;
+  host: string;
+  port: number;
+  folder: string;
+  processedFolder: string;
+  hasPassword: boolean;
+  error?: string;
+}
+/** leeres Passwort beim Bearbeiten: altes behalten */
+export type MailAccountInput = Omit<MailAccount, "nr" | "hasPassword" | "error"> & { password: string };
+export interface ServerGuess { host: string; port: number; quelle: string }
+export interface ConnectionTest { ok: boolean; error?: string; folders: string[]; messages?: number }
+
 /** Location anlegen oder ändern – Typ ergibt sich aus der Adresse */
 export interface LocationInput {
   name: string;
@@ -333,6 +350,13 @@ export const api = {
   addLocation: (l: LocationInput) => call<KalenderQuelle>("POST", "/kalender/quellen", l),
   updateLocation: (id: string, l: LocationInput) => call<KalenderQuelle>("PUT", `/kalender/quellen/${encodeURIComponent(id)}`, l),
   /** id: beim Bearbeiten die eigene Quelle, damit sie nicht als „schon eingetragen“ gilt */
+  mailAccounts: () => call<MailAccount[]>("GET", "/mail/accounts"),
+  addMailAccount: (a: MailAccountInput) => call<MailAccount[]>("POST", "/mail/accounts", a),
+  updateMailAccount: (nr: number, a: MailAccountInput) => call<MailAccount[]>("PUT", `/mail/accounts/${nr}`, a),
+  deleteMailAccount: (nr: number) => call<MailAccount[]>("DELETE", `/mail/accounts/${nr}`),
+  guessMailServer: (email: string) => call<ServerGuess | null>("POST", "/mail/accounts/erkennen", { email }),
+  /** nr: beim Bearbeiten ohne neues Passwort das gespeicherte nehmen */
+  testMailAccount: (a: MailAccountInput, nr?: number) => call<ConnectionTest>("POST", "/mail/accounts/test", { ...a, nr }),
   erkennen: (url: string, id?: string) => call<Erkennung>("POST", "/kalender/quellen/erkennen", { url, id }),
   setOrt: (name: string, land: string) => call<Record<string, string>>("PUT", "/kalender/orte", { name, land }),
   deleteOrt: (name: string) => call<Record<string, string>>("DELETE", `/kalender/orte/${encodeURIComponent(name)}`),

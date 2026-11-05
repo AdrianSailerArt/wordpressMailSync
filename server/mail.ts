@@ -3,6 +3,7 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { convert } from "html-to-text";
+import type { MailAccount } from "./accounts.ts";
 import type { ImapAccount } from "./config.ts";
 
 export const DONE_FLAG = "$PressbotDone";
@@ -147,44 +148,58 @@ export const mailId = (account: number, uid: number) => account * ACCOUNT_SPAN +
 export const splitMailId = (id: number) => ({ account: Math.floor(id / ACCOUNT_SPAN), uid: id % ACCOUNT_SPAN });
 
 export interface MailboxStatus {
+  /** feste Nummer des Postfachs (fehlt in der Demo) */
+  nr?: number;
   name: string;
   folder: string;
   error?: string;
 }
 
-/** Alle Postfächer zusammen; fällt eins aus, laufen die anderen weiter. */
+/**
+ * Alle Postfächer zusammen; fällt eins aus, laufen die anderen weiter.
+ * Die Mail-ID enthält die feste Nummer des Postfachs, nicht seine Position in der Liste.
+ */
 export class Mailboxes {
-  private boxes: Mailbox[];
+  private boxes = new Map<number, Mailbox>();
   private errors = new Map<number, string>();
 
-  constructor(accounts: ImapAccount[], maxAgeDays: number) {
-    this.boxes = accounts.map((a) => new Mailbox(a, maxAgeDays));
+  constructor(accounts: MailAccount[], private maxAgeDays: number) {
+    this.setAccounts(accounts);
+  }
+
+  /** nach Änderungen im Dashboard – gilt ab dem nächsten Abruf */
+  setAccounts(accounts: MailAccount[]) {
+    this.boxes = new Map(accounts.map((a) => [a.nr, new Mailbox(a, this.maxAgeDays)]));
+    for (const nr of this.errors.keys()) if (!this.boxes.has(nr)) this.errors.delete(nr);
   }
 
   status(): MailboxStatus[] {
-    return this.boxes.map((b, i) => ({ name: b.cfg.name, folder: b.cfg.folder, error: this.errors.get(i) }));
+    return [...this.boxes].map(([nr, b]) => ({ nr, name: b.cfg.name, folder: b.cfg.folder, error: this.errors.get(nr) }));
   }
 
   private box(id: number) {
     const { account, uid } = splitMailId(id);
-    const box = this.boxes[account];
-    if (!box) throw new Error(`Postfach ${account + 1} ist nicht eingerichtet`);
+    const box = this.boxes.get(account);
+    if (!box) throw new Error("Das Postfach dieser Mail ist nicht mehr eingerichtet");
     return { box, account, uid };
   }
 
   private tag(mail: PressMail, account: number): PressMail {
-    return { ...mail, uid: mailId(account, mail.uid), account: this.boxes[account]!.cfg.name };
+    return { ...mail, uid: mailId(account, mail.uid), account: this.boxes.get(account)!.cfg.name };
   }
 
   async candidates(done: Set<string> = new Set()): Promise<PressMail[]> {
-    const results = await Promise.allSettled(this.boxes.map((b) => b.candidates(done)));
+    if (!this.boxes.size) throw new Error("Noch kein Postfach eingerichtet – unter Einstellungen → Postfächer hinzufügen");
+    const entries = [...this.boxes];
+    const results = await Promise.allSettled(entries.map(([, b]) => b.candidates(done)));
     const mails: PressMail[] = [];
     results.forEach((r, i) => {
+      const nr = entries[i]![0];
       if (r.status === "fulfilled") {
-        this.errors.delete(i);
-        mails.push(...r.value.map((m) => this.tag(m, i)));
+        this.errors.delete(nr);
+        mails.push(...r.value.map((m) => this.tag(m, nr)));
       } else {
-        this.errors.set(i, r.reason instanceof Error ? r.reason.message : String(r.reason));
+        this.errors.set(nr, r.reason instanceof Error ? r.reason.message : String(r.reason));
       }
     });
     // nur wenn gar nichts geht, ist das ein Fehler – sonst zeigt das Dashboard das kaputte Postfach an
@@ -212,7 +227,7 @@ export class Mailbox {
     const client = new ImapFlow({
       host: this.cfg.host,
       port: this.cfg.port,
-      secure: true,
+      secure: this.cfg.port !== 143,
       auth: { user: this.cfg.user, pass: this.cfg.password },
       logger: false,
     });

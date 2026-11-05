@@ -2,10 +2,11 @@
 import { computed } from "vue";
 import type { Status } from "../api";
 import Icon from "./Icon.vue";
+import MailAccounts from "./MailAccounts.vue";
 import ModelPicker from "./ModelPicker.vue";
 import PageHeader from "./PageHeader.vue";
 
-/** Sprachmodell wählen und die Einstellungen aus der .env ansehen. */
+/** Sprachmodell und Postfächer wählen, die übrigen Einstellungen aus der .env ansehen. */
 const props = defineProps<{ status: Status }>();
 const emit = defineEmits<{ changed: [] }>();
 
@@ -23,11 +24,6 @@ const groups = computed(() => {
       ],
     },
     {
-      title: c.mailboxes.length > 1 ? "Postfächer" : "Postfach",
-      icon: "mail" as const,
-      rows: c.mailboxes.map((m) => [m.name, m.error ? `${m.folder} · Fehler: ${m.error}` : m.folder]),
-    },
-    {
       title: "Zeitpläne",
       icon: "clock" as const,
       rows: [
@@ -42,7 +38,7 @@ const groups = computed(() => {
 </script>
 
 <template>
-  <PageHeader title="Einstellungen" description="Sprachmodell wählen – alles andere kommt aus der .env des Servers." />
+  <PageHeader title="Einstellungen" description="Sprachmodell und Postfächer stellst du hier ein – der Rest kommt aus der .env des Servers." />
 
   <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
     <section class="card">
@@ -57,6 +53,7 @@ const groups = computed(() => {
     </section>
 
     <div class="space-y-6">
+      <MailAccounts @changed="emit('changed')" />
       <section v-for="g in groups" :key="g.title" class="card">
         <div class="card-header">
           <Icon :name="g.icon" class="text-zinc-400" />

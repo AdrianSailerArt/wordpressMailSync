@@ -59,8 +59,12 @@ IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ─�
 
 ### Mehrere Postfächer und Dubletten
 
-Weitere Postfächer kommen über `IMAP_2_USER`, `IMAP_2_PASSWORD` usw. in die `.env` (siehe
-`.env.example`, bis zu 9). Fällt eins aus, laufen die anderen weiter; das Dashboard zeigt den Fehler.
+Postfächer richtest du im Dashboard unter *Einstellungen → Postfächer* ein: Mail-Adresse und Passwort
+eintragen, der IMAP-Server wird erkannt (bekannte Anbieter, DNS), „Verbindung testen“ prüft die Anmeldung
+und lädt die Ordner zur Auswahl. Gespeichert wird in der lokalen Datenbank, Passwörter gehen nie ans
+Dashboard zurück. Stehen noch `IMAP_*`-Einträge in der `.env`, werden sie beim ersten Start einmal
+übernommen und danach nicht mehr gelesen. Fällt ein Postfach aus, laufen die anderen weiter; das
+Dashboard zeigt den Fehler.
 
 Dieselbe Pressemitteilung in mehreren Postfächern wird **zusammengefasst** („2× erhalten“) –
 auch wenn die Agentur sie einzeln verschickt hat (eigene Message-ID, persönliche Anrede, eigene
@@ -116,7 +120,7 @@ Dashboard-Tab geschlossen ist (Chrome muss laufen). Ein Klick öffnet direkt den
 
 ```bash
 bun install
-cp .env.example .env      # IMAP- und WordPress-Zugang eintragen
+cp .env.example .env      # WordPress-Zugang eintragen – Postfächer dann im Dashboard
 bun run start             # Dashboard bauen + Server mit Zeitplan → http://127.0.0.1:3210
 ```
 

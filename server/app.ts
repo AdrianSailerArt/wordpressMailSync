@@ -6,6 +6,7 @@ import { Store } from "./db.ts";
 import { DEMO_ENV, demoDeps } from "./demo.ts";
 import { ImageStore } from "./images.ts";
 import { LlmEvents } from "./llm-events.ts";
+import { loadAccounts } from "./accounts.ts";
 import { Mailboxes } from "./mail.ts";
 import { Pipeline } from "./pipeline.ts";
 import { Push } from "./push.ts";
@@ -39,15 +40,18 @@ export function createApp() {
     events,
     onTrace: (t) => store.saveTrace(t),
   });
+  // Postfächer stehen in der Datenbank – die aus der .env werden beim ersten Start übernommen
+  const accounts = loadAccounts(store, cfg.imap.accounts);
+  const mailboxes = demo ? null : new Mailboxes(accounts, cfg.imap.maxAgeDays);
   const deps = demo
     ? { ...demoDeps(store, events), notifier: push }
     : {
-        mailbox: new Mailboxes(cfg.imap.accounts, cfg.imap.maxAgeDays),
+        mailbox: mailboxes!,
         wordpress: new WordPress(cfg.wp, cfg.limits.timezone),
         rewriter,
         images: new ImageStore(join(cfg.server.dataDir, "images")),
         notifier: push,
         store,
       };
-  return { cfg, store, push, events, rewriter, pipeline: new Pipeline(cfg, deps), demo };
+  return { cfg, store, push, events, rewriter, pipeline: new Pipeline(cfg, deps), demo, mailboxes, accounts };
 }

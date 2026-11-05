@@ -24,10 +24,12 @@ function parseCategories(value: string): { categories: string[]; categorySlugs: 
 }
 
 /**
- * Postfächer: das erste über IMAP_*, weitere über IMAP_2_*, IMAP_3_* … (bis 9).
+ * Postfächer aus der .env – nur noch für die einmalige Übernahme beim ersten Start (siehe accounts.ts),
+ * danach werden sie im Dashboard gepflegt. Das erste über IMAP_*, weitere über IMAP_2_* … (bis 9).
  * Host, Port und Ordner übernehmen weitere Postfächer vom ersten, wenn sie fehlen.
  */
 function imapAccounts() {
+  if (!process.env.IMAP_HOST?.trim() || !process.env.IMAP_USER?.trim()) return [];
   const first = {
     name: env("IMAP_NAME", process.env.IMAP_USER?.trim() || "Postfach 1"),
     host: env("IMAP_HOST"),
