@@ -52,13 +52,27 @@ const todayShare = computed(() => (status.value ? Math.min(100, (status.value.to
 const pushLabel = computed(() => ({
   on: "Benachrichtigungen an",
   off: "Benachrichtigungen aus",
-  denied: "In Chrome blockiert",
+  denied: "Blockiert – so geht's wieder",
   unsupported: "Nicht unterstützt",
 })[push.value]);
 
+/** Anleitung, wenn der Browser Benachrichtigungen für diese Seite blockiert */
+const pushHelp = ref(false);
+const host = location.host;
+
+async function refreshPush() {
+  push.value = await pushState();
+  if (push.value !== "denied") pushHelp.value = false;
+}
+
 async function togglePush() {
+  if (push.value === "denied") {
+    pushHelp.value = true;
+    return;
+  }
   try {
     push.value = push.value === "on" ? await disablePush() : await enablePush();
+    if (push.value === "denied") pushHelp.value = true;
     if (push.value === "on") await api.testPush();
     loadStatus();
   } catch (e) {
@@ -119,7 +133,10 @@ let timer: ReturnType<typeof setInterval>;
 onMounted(() => {
   loadStatus();
   connectLive();
-  pushState().then((s) => (push.value = s));
+  refreshPush();
+  // Wer die Erlaubnis in den Website-Einstellungen ändert, soll das ohne Neuladen sehen
+  window.addEventListener("focus", refreshPush);
+  navigator.permissions?.query({ name: "notifications" }).then((p) => (p.onchange = refreshPush)).catch(() => {});
   onOpenRequest(openFromUrl);
   window.addEventListener("hashchange", onHashChange);
   window.addEventListener("popstate", onHashChange);
@@ -128,6 +145,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
   clearInterval(timer);
+  window.removeEventListener("focus", refreshPush);
   window.removeEventListener("hashchange", onHashChange);
   window.removeEventListener("popstate", onHashChange);
 });
@@ -200,12 +218,12 @@ onUnmounted(() => {
 
         <button
           class="-mx-1 flex w-[calc(100%+0.5rem)] cursor-pointer items-center gap-2 border border-transparent px-1 py-1.5 text-left transition hover:border-zinc-950 disabled:opacity-50 dark:hover:border-white/50"
-          :disabled="push === 'unsupported' || push === 'denied'"
-          :title="{ on: 'Chrome-Benachrichtigungen an – klicken zum Abschalten', off: 'Chrome-Benachrichtigungen einschalten', denied: 'Benachrichtigungen sind für diese Seite in Chrome blockiert', unsupported: 'Dieser Browser unterstützt keine Push-Benachrichtigungen' }[push]"
+          :disabled="push === 'unsupported'"
+          :title="{ on: 'Benachrichtigungen an – klicken zum Abschalten', off: 'Benachrichtigungen einschalten', denied: 'Der Browser blockiert Benachrichtigungen für diese Seite – klicken für die Anleitung', unsupported: 'Dieser Browser unterstützt keine Push-Benachrichtigungen' }[push]"
           @click="togglePush"
         >
           <Icon :name="push === 'on' ? 'bell' : 'bell-off'" :class="push === 'on' ? 'text-brand-600 dark:text-brand-400' : 'text-zinc-400'" />
-          <span class="flex-1" :class="push === 'on' ? 'font-semibold text-zinc-950 dark:text-zinc-100' : 'text-zinc-500'">{{ pushLabel }}</span>
+          <span class="flex-1" :class="push === 'on' ? 'font-semibold text-zinc-950 dark:text-zinc-100' : push === 'denied' ? 'text-brand-700 underline underline-offset-2 dark:text-brand-300' : 'text-zinc-500'">{{ pushLabel }}</span>
         </button>
       </div>
     </aside>
@@ -220,7 +238,7 @@ onUnmounted(() => {
           {{ status ? `heute ${status.today}/${status.limit}` : "…" }}
         </p>
       </div>
-      <button class="btn btn-ghost btn-icon" :disabled="push === 'unsupported' || push === 'denied'" :title="pushLabel" @click="togglePush">
+      <button class="btn btn-ghost btn-icon" :disabled="push === 'unsupported'" :title="pushLabel" @click="togglePush">
         <Icon :name="push === 'on' ? 'bell' : 'bell-off'" :size="18" />
       </button>
     </header>
@@ -232,6 +250,20 @@ onUnmounted(() => {
           <Icon name="alert" class="mt-0.5" />
           <span class="min-w-0 flex-1 break-words">{{ error }}</span>
           <button class="-my-0.5 opacity-60 hover:opacity-100" title="Schließen" @click="error = ''"><Icon name="x" /></button>
+        </div>
+
+        <div v-if="pushHelp" class="alert alert-warn mb-6">
+          <Icon name="bell-off" class="mt-0.5" />
+          <div class="min-w-0 flex-1 space-y-2">
+            <p class="font-semibold">Der Browser blockiert Benachrichtigungen für {{ host }}</p>
+            <ol class="list-decimal space-y-1 pl-5">
+              <li>Links in der Adresszeile auf das Symbol vor <code class="font-mono text-xs">{{ host }}</code> klicken → <b>Website-Einstellungen</b>.</li>
+              <li><b>Benachrichtigungen</b> auf <b>Zulassen</b> stellen und hierher zurückkommen – der Schalter wird dann wieder aktiv.</li>
+              <li>Kommt danach trotzdem nichts an: in macOS unter <b>Systemeinstellungen → Mitteilungen → Google Chrome</b> Mitteilungen erlauben und prüfen, ob ein Fokus-Modus aktiv ist.</li>
+            </ol>
+            <p class="text-xs text-zinc-600 dark:text-zinc-400">Die Erlaubnis gilt pro Adresse samt Port. In eingebetteten Vorschau-Browsern lässt sie sich oft gar nicht erteilen – dann die Seite in Chrome öffnen.</p>
+          </div>
+          <button class="-my-0.5 cursor-pointer opacity-60 hover:opacity-100" title="Schließen" @click="pushHelp = false"><Icon name="x" /></button>
         </div>
 
         <template v-if="tab === 'postfach'">
