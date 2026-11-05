@@ -1,13 +1,14 @@
-/** Einmaliger Lauf ohne Server, z. B. für Cronjobs oder GitHub Actions. `--dry-run` veröffentlicht nichts. */
+/**
+ * Testlauf ohne Server: zeigt, welche Beiträge aus den offenen Mails entstünden.
+ * Veröffentlicht wird hier nie – nur über die Freigabe eines Entwurfs im Dashboard.
+ */
 
 import { createApp } from "./app.ts";
 
-const dryRun = process.argv.includes("--dry-run");
 const { pipeline } = createApp();
-const result = await pipeline.run(dryRun);
+const result = await pipeline.run();
 
 for (const article of result.previews) {
   console.log(`\n=== ${article.title} ===\nSlug: ${article.slug}\nKategorie: ${article.category}\nTags: ${article.tags.join(", ")}\nMeta: ${article.meta_description}\n\n${article.content_html}\n`);
 }
-for (const post of result.published) console.log(`Veröffentlicht: ${post.title} (${post.link})`);
 console.log(result.message);

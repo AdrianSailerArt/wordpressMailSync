@@ -69,10 +69,9 @@ export interface SuggestResult {
   message: string;
 }
 
+/** Testlauf: zeigt, welche Beiträge entstehen würden – veröffentlicht und markiert nichts. */
 export interface RunResult {
-  published: { title: string; link: string }[];
   skipped: number;
-  dryRun: boolean;
   previews: Article[];
   message: string;
 }
@@ -121,8 +120,9 @@ export class Pipeline {
     this.deps.store.log(kind, subject, detail, link);
   }
 
-  async remainingToday(): Promise<{ today: number; limit: number }> {
-    return { today: await this.deps.wordpress.postsToday(), limit: this.cfg.limits.daily };
+  /** heute veröffentlichte Beiträge – nur zur Anzeige */
+  postsToday(): Promise<number> {
+    return this.deps.wordpress.postsToday();
   }
 
   mailboxStatus(): MailboxStatus[] {
@@ -268,7 +268,10 @@ export class Pipeline {
     return post;
   }
 
-  /** Manuell aus dem Dashboard veröffentlichen – DAILY_LIMIT ist nur ein Richtwert und bremst hier nicht. */
+  /**
+   * Der einzige Weg nach WordPress: Freigabe eines Entwurfs durch den Benutzer im Dashboard.
+   * Bühnenpost veröffentlicht nie von selbst – kein Zeitplan, kein Lauf ruft das auf.
+   */
   publish(uid: number): Promise<{ id: number; link: string }> {
     return this.exclusive(async () => {
       const mail = await this.mustGet(uid);
@@ -317,69 +320,33 @@ export class Pipeline {
   }
 
   /**
-   * Lauf: höchstens POSTS_PER_RUN neue Beiträge. Der Zeitplan hält sich an den Richtwert DAILY_LIMIT,
-   * ein manueller Klick („Ausführen“) darf darüber hinaus.
+   * Testlauf: für höchstens `perRun` offene Mails Entwürfe schreiben und zeigen. Veröffentlicht nichts und
+   * markiert nichts – freigegeben wird jeder Beitrag einzeln über publish().
    */
-  run(dryRun = false, { manual = false } = {}): Promise<RunResult> {
+  run(): Promise<RunResult> {
     return this.exclusive(async () => {
-      const result: RunResult = { published: [], skipped: 0, dryRun, previews: [], message: "" };
+      const result: RunResult = { skipped: 0, previews: [], message: "" };
       try {
-        const { today, limit } = await this.remainingToday();
-        const remaining = manual ? this.cfg.limits.perRun : Math.min(this.cfg.limits.perRun, limit - today);
-        if (remaining <= 0) {
-          result.message = `Richtwert für heute erreicht (${today}/${limit}) – manuell geht weiterhin`;
-          return result;
-        }
-
         for (const mail of await this.candidates()) {
-          if (result.published.length + result.previews.length >= remaining) break;
-
+          if (result.previews.length >= this.cfg.limits.perRun) break;
           if (!looksRelevant(mail)) {
             result.skipped++;
-            if (!dryRun) {
-              await this.markMail(mail, SKIPPED_FLAG);
-              this.log("skipped", mail.subject, "Vorfilter: keine Musik-Stichworte");
-            }
             continue;
           }
-
           const article = await this.draftFor(mail);
-          if (!article.relevant) {
+          if (!article.relevant || (await this.deps.wordpress.slugExists(article.slug))) {
             result.skipped++;
-            if (!dryRun) {
-              await this.markMail(mail, SKIPPED_FLAG);
-              this.log("skipped", mail.subject, `nicht relevant: ${article.reason}`);
-            }
             continue;
           }
-
-          if (await this.deps.wordpress.slugExists(article.slug)) {
-            result.skipped++;
-            if (!dryRun) {
-              await this.markMail(mail, DONE_FLAG);
-              this.log("skipped", mail.subject, `Beitrag existiert bereits (${article.slug})`);
-            }
-            continue;
-          }
-
-          if (dryRun) {
-            result.previews.push(article);
-            continue;
-          }
-          const post = await this.publishMail(mail, article);
-          result.published.push({ title: article.title, link: post.link });
+          result.previews.push(article);
         }
-
-        const count = dryRun ? result.previews.length : result.published.length;
-        result.message = `${count} Beitrag/Beiträge ${dryRun ? "als Vorschau erzeugt" : "veröffentlicht"}, ${result.skipped} übersprungen`;
+        result.message = `${result.previews.length} Entwurf/Entwürfe als Vorschau erzeugt, ${result.skipped} übersprungen – veröffentlicht wird nur, was du freigibst`;
         return result;
       } catch (err) {
         // abgebrochen ist kein Fehler – die Mail bleibt unbearbeitet und kommt beim nächsten Lauf wieder
         if (err instanceof CancelledError) result.message = "Lauf abgebrochen";
         else this.log("error", "", String(err));
         throw err;
-      } finally {
-        if (!dryRun && result.message) this.log("run", "", result.message);
       }
     });
   }

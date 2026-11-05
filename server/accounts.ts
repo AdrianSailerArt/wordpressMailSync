@@ -69,6 +69,9 @@ export function updateAccount(accounts: MailAccount[], nr: number, input: Accoun
   const old = accounts.find((a) => a.nr === nr);
   if (!old) throw new Error("Dieses Postfach gibt es nicht");
   const data = parse(input);
+  // anderer Server oder Benutzer: das alte Passwort gehört nicht dazu
+  const same = data.host.toLowerCase() === old.host.toLowerCase() && data.user.toLowerCase() === old.user.toLowerCase();
+  if (!data.password && !same) throw new Error("Für einen anderen Server oder Benutzer das Passwort neu eingeben");
   return accounts.map((a) => (a.nr === nr ? { ...data, password: data.password || old.password, nr } : a));
 }
 

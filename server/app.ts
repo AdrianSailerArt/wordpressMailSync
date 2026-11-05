@@ -7,6 +7,7 @@ import { DEMO_ENV, demoDeps } from "./demo.ts";
 import { ImageStore } from "./images.ts";
 import { LlmEvents } from "./llm-events.ts";
 import { loadAccounts } from "./accounts.ts";
+import { applySetup, envDefaults, importEnv, loadSetup } from "./setup.ts";
 import { Mailboxes } from "./mail.ts";
 import { Pipeline } from "./pipeline.ts";
 import { Push } from "./push.ts";
@@ -15,7 +16,7 @@ import { WordPress } from "./wordpress.ts";
 
 export const modelSetting = (provider: LlmProvider) => `${provider}_model`;
 
-/** Cloud-Anbieter sind nur wählbar, wenn ihr API-Key in der .env steht */
+/** Cloud-Anbieter sind nur wählbar, wenn ihr API-Key gesetzt ist (Einstellungen → API-Keys) */
 export const providerReady = (cfg: Config["llm"], provider: LlmProvider) =>
   provider === "claude" ? cfg.claudeKey : provider === "openai" ? !!cfg.openaiKey : true;
 
@@ -31,6 +32,10 @@ export function createApp() {
 
   const cfg = loadConfig();
   const store = new Store(cfg.server.dbPath);
+  // Einstellungen stehen in der Datenbank – eine vorhandene .env wird beim ersten Start einmal übernommen
+  if (importEnv(store)) console.log("Einstellungen aus der .env übernommen – sie wird nicht mehr gebraucht (Einstellungen im Dashboard).");
+  const defaults = envDefaults(cfg, process.env.TICKETMASTER_API_KEY?.trim() ?? "");
+  applySetup(cfg, null, loadSetup(store), defaults);
   applyStoredProvider(cfg.llm, store);
   const push = new Push(store, cfg.server.dataDir);
   const events = new LlmEvents();
@@ -42,16 +47,16 @@ export function createApp() {
   });
   // Postfächer stehen in der Datenbank – die aus der .env werden beim ersten Start übernommen
   const accounts = loadAccounts(store, cfg.imap.accounts);
-  const mailboxes = demo ? null : new Mailboxes(accounts, cfg.imap.maxAgeDays);
+  const mailboxes = demo ? null : new Mailboxes(accounts, () => cfg.imap.maxAgeDays);
   const deps = demo
     ? { ...demoDeps(store, events), notifier: push }
     : {
         mailbox: mailboxes!,
-        wordpress: new WordPress(cfg.wp, cfg.limits.timezone),
+        wordpress: new WordPress(cfg.wp, cfg.limits),
         rewriter,
         images: new ImageStore(join(cfg.server.dataDir, "images")),
         notifier: push,
         store,
       };
-  return { cfg, store, push, events, rewriter, pipeline: new Pipeline(cfg, deps), demo, mailboxes, accounts };
+  return { cfg, store, push, events, rewriter, pipeline: new Pipeline(cfg, deps), demo, mailboxes, accounts, defaults };
 }

@@ -25,14 +25,27 @@ export const localDate = (timezone: string, date = new Date()) =>
   new Intl.DateTimeFormat("sv-SE", { timeZone: timezone }).format(date);
 
 export class WordPress {
-  private api: string;
-  private auth: string;
   private me?: number;
   private cats?: { at: number; list: Promise<WpCategory[]> };
+  /** Zugang, für den me/cats gelten – ändert ihn die Einrichtung, wird neu geladen */
+  private account = "";
 
-  constructor(private cfg: Config["wp"], private timezone: string) {
-    this.api = `${cfg.url}/wp-json/wp/v2`;
-    this.auth = "Basic " + Buffer.from(`${cfg.user}:${cfg.appPassword.replace(/\s+/g, "")}`).toString("base64");
+  /** limits: daraus die Zeitzone – ändert sie die Einrichtung, gilt das sofort */
+  constructor(private cfg: Config["wp"], private limits: { timezone: string }) {}
+
+  private get api() {
+    if (!this.cfg.url) throw new Error("WordPress ist noch nicht eingerichtet – Einstellungen → Einrichtung");
+    const account = `${this.cfg.url}|${this.cfg.user}`;
+    if (account !== this.account) {
+      this.account = account;
+      this.me = undefined;
+      this.cats = undefined;
+    }
+    return `${this.cfg.url}/wp-json/wp/v2`;
+  }
+
+  private get auth() {
+    return "Basic " + Buffer.from(`${this.cfg.user}:${this.cfg.appPassword.replace(/\s+/g, "")}`).toString("base64");
   }
 
   private async req(method: string, path: string, init: { query?: Record<string, string | number>; json?: unknown; body?: Uint8Array | string; headers?: Record<string, string> } = {}) {
@@ -60,7 +73,7 @@ export class WordPress {
       query: {
         author: await this.userId(),
         // ohne Offset interpretiert WordPress das Datum in der Zeitzone der Website
-        after: `${localDate(this.timezone)}T00:00:00`,
+        after: `${localDate(this.limits.timezone)}T00:00:00`,
         per_page: 1, status: ALL_STATUSES, context: "edit", _fields: "id",
       },
     });
@@ -91,6 +104,7 @@ export class WordPress {
 
   /** Alle Kategorien der Website (10 Minuten zwischengespeichert). */
   categories(): Promise<WpCategory[]> {
+    void this.api; // setzt den Zwischenspeicher zurück, wenn sich der Zugang geändert hat
     if (!this.cats || Date.now() - this.cats.at > 600_000) {
       const list = this.loadCategories();
       list.catch(() => (this.cats = undefined));

@@ -7,7 +7,7 @@ import { ArticleSchema } from "../server/rewrite.ts";
 
 const cfg = {
   wp: { categories: ["News"], featuredImage: true },
-  limits: { daily: 3, perRun: 1 },
+  limits: { perRun: 1 },
 } as unknown as Config;
 
 const mail = (uid: number, subject: string, body = "…"): PressMail =>
@@ -87,24 +87,11 @@ beforeEach(() => {
   today = 0;
 });
 
-test("ein Beitrag pro Lauf, Mails werden korrekt markiert", async () => {
+test("Lauf veröffentlicht nie – er zeigt nur Entwürfe und markiert nichts", async () => {
   const result = await pipeline().run();
-  expect(result.published).toHaveLength(1);
-  expect(created).toEqual(["post-3"]);
-  expect(marks).toEqual([[1, SKIPPED_FLAG], [2, SKIPPED_FLAG], [3, DONE_FLAG]]);
-});
-
-test("Richtwert erreicht: Zeitplan veröffentlicht nichts", async () => {
-  today = 3;
-  const result = await pipeline().run();
-  expect(result.message).toContain("Richtwert");
-  expect(created).toEqual([]);
-  expect(marks).toEqual([]);
-});
-
-test("Testlauf veröffentlicht und markiert nichts", async () => {
-  const result = await pipeline().run(true);
   expect(result.previews.map((a) => a.slug)).toEqual(["post-3"]);
+  expect(result.skipped).toBe(2);
+  expect(result.message).toContain("nur, was du freigibst");
   expect(created).toEqual([]);
   expect(marks).toEqual([]);
 });
@@ -122,23 +109,22 @@ test("Vorschau wird zwischengespeichert, bearbeiteter Entwurf wird veröffentlic
   expect(marks).toEqual([[4, DONE_FLAG]]);
 });
 
-test("Richtwert erreicht: manuell veröffentlichen geht trotzdem", async () => {
-  today = 3;
+test("Freigabe geht immer – es gibt kein Tageslimit, das bremst", async () => {
+  today = 30;
   const p = pipeline();
-  expect((await p.run()).message).toContain("Richtwert");
-  expect((await p.run(false, { manual: true })).published).toHaveLength(1);
+  await p.publish(3);
   await p.publish(4);
   expect(created).toEqual(["post-3", "post-4"]);
 });
 
-test("ohne IMAP-Markierungen: erledigte Mails kommen nicht wieder", async () => {
+test("ohne IMAP-Markierungen: freigegebene Mails kommen nicht wieder", async () => {
   const p = pipeline();
-  await p.run();
-  await p.run();
+  await p.publish(3);
+  await p.publish(4);
   expect(created).toEqual(["post-3", "post-4"]);
-  const third = await p.run();
-  expect(third.published).toHaveLength(0);
-  expect(await p.listMails()).toHaveLength(0);
+  expect((await p.run()).previews).toHaveLength(0);
+  expect(await p.listMails()).toHaveLength(2);
+  expect((await p.listMails()).map((m) => m.uid)).not.toContain(3);
 });
 
 test("Thumbnail: automatisch das größte Bild, sonst die Auswahl aus dem Entwurf", async () => {

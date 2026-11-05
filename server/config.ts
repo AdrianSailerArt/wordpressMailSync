@@ -1,19 +1,17 @@
-/** Konfiguration aus Umgebungsvariablen (Bun lädt .env automatisch). */
+/**
+ * Eingebaute Standardwerte. Die Einstellungen selbst stehen in der Datenbank (setup.ts, accounts.ts);
+ * Umgebungsvariablen – etwa aus einer alten .env – werden nur beim ersten Start einmal übernommen.
+ * Ausnahmen als Startparameter: DB_PATH, DATA_DIR (und HOST/PORT gehen vor).
+ */
 
-const missing: string[] = [];
-
-function env(name: string, fallback?: string): string {
-  const value = process.env[name]?.trim();
-  if (value) return value;
-  if (fallback !== undefined) return fallback;
-  missing.push(name);
-  return "";
+function env(name: string, fallback = ""): string {
+  return process.env[name]?.trim() || fallback;
 }
 
 const bool = (name: string, fallback: boolean) =>
   ["1", "true", "yes", "ja"].includes(env(name, String(fallback)).toLowerCase());
 
-function parseCategories(value: string): { categories: string[]; categorySlugs: Record<string, string> } {
+export function parseCategories(value: string): { categories: string[]; categorySlugs: Record<string, string> } {
   const categorySlugs: Record<string, string> = {};
   const categories = value.split(",").map((entry) => {
     const [label, slug] = entry.split("=").map((s) => s.trim());
@@ -63,9 +61,7 @@ export const LLM_PROVIDERS = ["ollama", "mlx", "opencode", "openai", "claude"] a
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
 function llmConfig(provider: LlmProvider) {
-  // den Key liest das Anthropic-SDK selbst, hier nur auf Vorhandensein prüfen
-  if (provider === "claude") env("ANTHROPIC_API_KEY");
-  if (provider === "openai") env("OPENAI_API_KEY");
+  // API-Keys sind optional – ohne Key ist der Anbieter im Dashboard ausgegraut (Einrichtung → Sprachmodell)
   return {
     provider,
     ollamaUrl: env("OLLAMA_URL", "http://127.0.0.1:11434").replace(/\/+$/, ""),
@@ -90,20 +86,12 @@ function llmConfig(provider: LlmProvider) {
   };
 }
 
-const wpUrl = () => env("WP_URL").replace(/\/+$/, "").replace(/^(?!https?:\/\/)(?=.)/, "https://");
+/** WordPress ist optional beim Start – die Einrichtung im Dashboard trägt es nach */
+export const normalizeWpUrl = (url: string) => url.trim().replace(/\/+$/, "").replace(/^(?!https?:\/\/)(?=.)/, "https://");
+const wpUrl = () => normalizeWpUrl(env("WP_URL", ""));
 
-function reportMissing() {
-  if (!missing.length) return;
-  console.error(
-    `\nEs fehlen Einstellungen: ${missing.join(", ")}\n\n` +
-      "→ .env.example nach .env kopieren und ausfüllen:  cp .env.example .env\n" +
-      "→ oder ohne Zugangsdaten ausprobieren:          DEMO=1 bun run start\n",
-  );
-  process.exit(1);
-}
 
 export function loadConfig() {
-  missing.length = 0;
   const provider = env("LLM_PROVIDER", "ollama").toLowerCase() as LlmProvider;
   const config = {
     imap: {
@@ -112,20 +100,19 @@ export function loadConfig() {
     },
     wp: {
       url: wpUrl(),
-      user: env("WP_USER"),
-      appPassword: env("WP_APP_PASSWORD"),
+      user: env("WP_USER", ""),
+      appPassword: env("WP_APP_PASSWORD", ""),
       status: env("WP_STATUS", "publish") as "publish" | "draft" | "pending",
       // "News=music-news,Events=events": Anzeigename für das Modell = Slug der WordPress-Kategorie
       ...parseCategories(env("WP_CATEGORIES", "News")),
       seoPlugin: env("SEO_PLUGIN", "none").toLowerCase() as SeoPlugin,
       featuredImage: bool("FEATURED_IMAGE", true),
     },
+    // Veröffentlicht wird nie automatisch – nur die Freigabe im Dashboard schickt einen Beitrag nach WordPress
     limits: {
-      daily: Number(env("DAILY_LIMIT", "3")),
+      /** Entwürfe pro Testlauf */
       perRun: Number(env("POSTS_PER_RUN", "1")),
       timezone: env("TIMEZONE", "Europe/Berlin"),
-      schedule: env("SCHEDULE", "0 8,13,18 * * *"),
-      autoPublish: bool("AUTO_PUBLISH", true),
       // 10 automatische Vorschläge pro Tag, grob alle 1,5 Stunden
       suggestSchedule: env("SUGGEST_SCHEDULE", "0 8,9,11,12,14,15,17,18,20,21 * * *"),
     },
@@ -139,7 +126,6 @@ export function loadConfig() {
     },
   };
 
-  reportMissing();
   return config;
 }
 
@@ -147,10 +133,9 @@ export type Config = ReturnType<typeof loadConfig>;
 
 /** Konzertkalender: braucht nur WordPress und das Sprachmodell, kein Postfach. */
 export function loadKalenderConfig() {
-  missing.length = 0;
   const provider = env("LLM_PROVIDER", "ollama").toLowerCase() as LlmProvider;
   const config = {
-    wp: { url: wpUrl(), user: env("WP_USER"), appPassword: env("WP_APP_PASSWORD") },
+    wp: { url: wpUrl(), user: env("WP_USER", ""), appPassword: env("WP_APP_PASSWORD", "") },
     llm: llmConfig(provider),
     timezone: env("TIMEZONE", "Europe/Berlin"),
     // Quellen (Veranstalter, Clubs) und Gebiet für Ticketmaster
@@ -164,7 +149,6 @@ export function loadKalenderConfig() {
     // Zwischenspeicher fürs Sprachmodell liegt in der Datenbank des Dashboards
     dbPath: env("DB_PATH", "data/pressbot.sqlite"),
   };
-  reportMissing();
   return config;
 }
 

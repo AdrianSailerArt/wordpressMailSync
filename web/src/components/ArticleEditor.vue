@@ -13,7 +13,6 @@ const props = defineProps<{
   uid: number;
   categories: string[];
   busy: string;
-  limitReached: boolean;
 }>();
 const emit = defineEmits<{ save: [Article]; publish: [] }>();
 
@@ -294,7 +293,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
     <div class="sticky bottom-20 z-10 -mx-1 flex flex-wrap items-center gap-2 border border-zinc-950 bg-white px-3 py-2.5 shadow-md lg:bottom-4 dark:border-white/40 dark:bg-zinc-900 dark:shadow-none">
       <span class="mr-auto flex items-center gap-1.5 text-xs" :class="dirty ? 'text-amber-700 dark:text-amber-400' : 'text-zinc-500'">
         <span v-if="dirty" class="size-1.5 rounded-full bg-amber-500" />
-        {{ dirty ? "Ungespeicherte Änderungen" : limitReached ? "Richtwert für heute erreicht – Veröffentlichen geht trotzdem" : article.generated_by ? `geschrieben von ${article.generated_by}` : "" }}
+        {{ dirty ? "Ungespeicherte Änderungen" : article.generated_by ? `geschrieben von ${article.generated_by}` : "" }}
       </span>
       <button class="btn" :disabled="!dirty || !!busy" @click="emit('save', { ...draft, tags: tags() })">
         <Icon name="save" />{{ busy === "save" ? "Speichert …" : "Speichern" }}

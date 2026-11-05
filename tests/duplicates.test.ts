@@ -65,7 +65,7 @@ test("Mail-IDs: erstes Postfach behält die UID, weitere sind eindeutig", () => 
 
 // --- Zusammenspiel mit der Pipeline: zwei Postfächer ---
 
-const cfg = { wp: { categories: ["News"], featuredImage: false }, limits: { daily: 3, perRun: 1 } } as unknown as Config;
+const cfg = { wp: { categories: ["News"], featuredImage: false }, limits: { perRun: 1 } } as unknown as Config;
 
 function setup(mails: PressMail[]) {
   const marks: [number, string][] = [];
@@ -114,7 +114,7 @@ test("Veröffentlichen erledigt alle Exemplare – nur ein Beitrag", async () =>
 test("Dublette, die erst nach dem Veröffentlichen ankommt, wird automatisch übersprungen", async () => {
   const mails = [first, other];
   const { pipeline, marks, created, store } = setup(mails);
-  await pipeline.run();
+  await pipeline.publish(first.uid);
   expect(created).toEqual(["post-5"]);
 
   mails.push(second); // kommt später im zweiten Postfach an

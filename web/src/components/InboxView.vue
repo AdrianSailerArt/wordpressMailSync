@@ -58,8 +58,6 @@ const detail = ref<HTMLElement | null>(null);
 /** Läuft für die ausgewählte Mail gerade das Modell (per Klick oder vom Zeitplan)? */
 const liveRun = computed(() => (selected.value ? live.runs[selected.value.uid] ?? null : null));
 
-const limitReached = computed(() => (props.status ? props.status.today >= props.status.limit : false));
-
 async function load() {
   loading.value = true;
   try {
@@ -317,7 +315,6 @@ onMounted(load);
             :uid="selected.uid"
             :categories="status?.config.categories ?? []"
             :busy="busy"
-            :limit-reached="limitReached"
             @save="save"
             @publish="publish"
           />

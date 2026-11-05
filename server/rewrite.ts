@@ -692,18 +692,26 @@ export interface RewriterOptions {
 export class Rewriter {
   /** Schreib-Anweisung je Meldungsart (Regelwerk mit passendem Aufbau-Abschnitt) */
   private systems = new Map<Meldungsart | "", string>();
-  private base: string;
+  /** Name, Ton und Kategorien, für die `systems` gebaut wurde – ändert die Einrichtung sie, neu bauen */
+  private builtFor = "";
   /** laufende Generierung – für den Abbrechen-Knopf */
   private running?: AbortController;
 
-  constructor(private cfg: Config["llm"], private categories: string[], private opts: RewriterOptions = {}) {
-    this.base = SYSTEM_PROMPT.replace("{siteName}", cfg.siteName)
-      .replace("{siteTone}", cfg.siteTone)
-      .replace("{categories}", categories.join(", "));
+  constructor(private cfg: Config["llm"], private categories: string[], private opts: RewriterOptions = {}) {}
+
+  private get base(): string {
+    return SYSTEM_PROMPT.replace("{siteName}", this.cfg.siteName)
+      .replace("{siteTone}", this.cfg.siteTone)
+      .replace("{categories}", this.categories.join(", "));
   }
 
   private system(art?: Meldungsart): string {
     const key = art ?? "";
+    const builtFor = `${this.cfg.siteName}|${this.cfg.siteTone}|${this.categories.join(",")}`;
+    if (builtFor !== this.builtFor) {
+      this.systems.clear();
+      this.builtFor = builtFor;
+    }
     if (!this.systems.has(key)) this.systems.set(key, this.base + loadStyleGuide(this.cfg.styleFile, art));
     return this.systems.get(key)!;
   }

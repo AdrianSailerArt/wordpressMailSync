@@ -3,16 +3,18 @@
 import { Cron } from "croner";
 import { Hono } from "hono";
 import { basicAuth } from "hono/basic-auth";
+import { HTTPException } from "hono/http-exception";
 import { serveStatic } from "hono/bun";
 import { streamSSE } from "hono/streaming";
 import { totalmem } from "node:os";
 import { createApp, modelSetting, providerReady } from "./app.ts";
-import { LLM_PROVIDERS, loadKalenderConfig, type LlmProvider } from "./config.ts";
+import { LLM_PROVIDERS, loadKalenderConfig, normalizeWpUrl, type LlmProvider } from "./config.ts";
 import { Kalender, type Auswahl, type KalenderResult } from "./kalender/sync.ts";
 import { addLocation, editQuellen, removeLocation, removeOrt, setOrt, updateLocation, type LocationInput } from "./kalender/locations.ts";
 import { erkennen } from "./kalender/erkennen.ts";
 import { loadQuellen } from "./kalender/events.ts";
 import { mailCsp } from "./mail-view.ts";
+import { applySetup, loadSetup, mergeSetup, publicSetup, saveSetup, testWordPress, type SetupInput } from "./setup.ts";
 import {
   addAccount, guessServer, removeAccount, saveAccounts, testConnection, toPublic, updateAccount,
   type AccountInput, type MailAccount,
@@ -38,29 +40,12 @@ const publicAccounts = () => {
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const at = (cron: Cron | null) => cron?.nextRun()?.toLocaleString("de-DE", { timeZone: cfg.limits.timezone }) ?? "–";
 
-/** Veröffentlichen (3× täglich) – lässt sich mit AUTO_PUBLISH=false abschalten. */
-const publishJob = cfg.limits.autoPublish
-  ? new Cron(cfg.limits.schedule, { timezone: cfg.limits.timezone, protect: true }, async () => {
-      try {
-        console.log(`[Veröffentlichen] ${(await pipeline.run()).message}`);
-      } catch (err) {
-        console.error(`[Veröffentlichen] Fehler: ${message(err)}`);
-      }
-    })
-  : null;
-
-/** Vorschläge (10× täglich) – erzeugt Entwürfe und benachrichtigt per Push. */
-const suggestJob = new Cron(cfg.limits.suggestSchedule, { timezone: cfg.limits.timezone, protect: true }, async () => {
-  try {
-    console.log(`[Vorschlag] ${(await pipeline.suggest()).message}`);
-  } catch (err) {
-    console.error(`[Vorschlag] Fehler: ${message(err)}`);
-  }
-});
 
 /** Konzertkalender (täglich, wenn KALENDER_AUTO=true) – Veranstalter-Seiten, Vaddi, Ticketmaster → WordPress-Plugin. */
 // dieselbe Sprachmodell-Einstellung wie das Postfach, damit die Wahl im Dashboard für beide gilt
-const kalenderCfg = { ...loadKalenderConfig(), llm: cfg.llm };
+// WordPress-Zugang teilt sich der Kalender mit den Beiträgen – Änderungen der Einrichtung gelten für beide
+const kalenderCfg = { ...loadKalenderConfig(), llm: cfg.llm, wp: cfg.wp };
+applySetup(cfg, kalenderCfg, loadSetup(store), wiring.defaults);
 const kalender = new Kalender(kalenderCfg, () => rewriter.model, store);
 const lastKalender = (): KalenderResult | null => JSON.parse(store.getSetting("kalender_last") ?? "null");
 /** `selected`: Anzahl einzeln übertragener Termine, `sources`: einzeln übertragene Quellen */
@@ -97,23 +82,37 @@ const inBackground = (task: () => Promise<unknown>) => {
     store.log("error", "Konzertkalender", message(err));
   });
 };
-const kalenderJob = kalenderCfg.auto
-  ? new Cron(kalenderCfg.schedule, { timezone: kalenderCfg.timezone, protect: true }, async () => {
-      try {
-        await runKalender();
-      } catch (err) {
-        console.error(`[Kalender] Fehler: ${message(err)}`);
-      }
-    })
-  : null;
+/**
+ * Zeitpläne – nach jeder Änderung in den Einstellungen neu aufgesetzt:
+ * Vorschläge mit Benachrichtigung (10× täglich) und Konzertkalender (täglich, wenn eingeschaltet).
+ * Beiträge veröffentlicht kein Zeitplan – nur die Freigabe im Dashboard.
+ */
+let suggestJob: Cron | null = null;
+let kalenderJob: Cron | null = null;
+const job = (pattern: string, timezone: string, label: string, task: () => Promise<unknown>) =>
+  new Cron(pattern, { timezone, protect: true }, async () => {
+    try {
+      await task();
+    } catch (err) {
+      console.error(`[${label}] Fehler: ${message(err)}`);
+    }
+  });
+function schedule() {
+  for (const j of [suggestJob, kalenderJob]) j?.stop();
+  const tz = cfg.limits.timezone;
+  suggestJob = job(cfg.limits.suggestSchedule, tz, "Vorschlag", async () => console.log(`[Vorschlag] ${(await pipeline.suggest()).message}`));
+  kalenderJob = kalenderCfg.auto ? job(kalenderCfg.schedule, tz, "Kalender", () => runKalender()) : null;
+}
+schedule();
 
 const app = new Hono();
 
-if (cfg.server.password) {
-  app.use("*", basicAuth({ username: "admin", password: cfg.server.password }));
-}
+// Dashboard-Passwort (Benutzer „admin“) – jede Anfrage liest den aktuellen Stand, ändern wirkt sofort
+app.use("*", (c, next) => (cfg.server.password ? basicAuth({ username: "admin", password: cfg.server.password })(c, next) : next()));
 
 app.onError((err, c) => {
+  // Anmeldung (Dashboard-Passwort) & Co.: Hono liefert die passende Antwort samt Passwort-Abfrage im Browser
+  if (err instanceof HTTPException) return err.getResponse();
   console.error(`[${c.req.method} ${c.req.path}] ${message(err)}`);
   return c.json({ error: message(err) }, 500);
 });
@@ -211,14 +210,10 @@ async function listModels(provider: LlmProvider): Promise<{ models: LlmModel[]; 
 
 const api = new Hono()
   .get("/status", async (c) => {
-    const { today, limit } = await pipeline.remainingToday();
     return c.json({
-      today,
-      limit,
+      today: await pipeline.postsToday(),
       busy: pipeline.busy,
-      schedule: cfg.limits.schedule,
-      nextRun: publishJob?.nextRun()?.toISOString() ?? null,
-      nextSuggestion: suggestJob.nextRun()?.toISOString() ?? null,
+      nextSuggestion: suggestJob?.nextRun()?.toISOString() ?? null,
       pushSubscribers: push.count(),
       config: {
         site: cfg.llm.siteName,
@@ -234,12 +229,31 @@ const api = new Hono()
         categories: cfg.wp.categories,
         timezone: cfg.limits.timezone,
         perRun: cfg.limits.perRun,
-        autoPublish: cfg.limits.autoPublish,
         suggestSchedule: cfg.limits.suggestSchedule,
       },
     });
   })
   .get("/wp/categories", async (c) => c.json(await pipeline.categories()))
+  // Einrichtung: Website, WordPress, API-Keys – Geheimnisse verlassen den Server nie
+  .get("/setup", (c) => c.json(publicSetup(cfg, kalenderCfg, loadSetup(store), accounts.length)))
+  .put("/setup", async (c) => {
+    const data = mergeSetup(loadSetup(store), (await c.req.json()) as SetupInput);
+    saveSetup(store, data);
+    applySetup(cfg, kalenderCfg, data, wiring.defaults);
+    schedule();
+    // ohne Key ist ein Cloud-Anbieter nicht mehr wählbar – dann zurück zum Standard
+    if (!providerReady(cfg.llm, cfg.llm.provider)) cfg.llm.provider = "ollama";
+    return c.json(publicSetup(cfg, kalenderCfg, data, accounts.length));
+  })
+  // WordPress-Zugang prüfen, ohne zu speichern – ohne Passwort: das gespeicherte
+  .post("/setup/wordpress/test", async (c) => {
+    const body = (await c.req.json()) as { url: string; user: string; appPassword?: string };
+    // gespeichertes Passwort nur für denselben Zugang – nie an eine andere (vertippte) Adresse schicken
+    const same = normalizeWpUrl(body.url ?? "") === cfg.wp.url && body.user === cfg.wp.user;
+    const appPassword = body.appPassword || (same ? cfg.wp.appPassword : "");
+    if (!appPassword) return c.json({ ok: false, error: "Für eine andere Adresse oder einen anderen Benutzer das Anwendungspasswort neu eingeben", categories: [] });
+    return c.json(await testWordPress({ ...body, appPassword }));
+  })
   // Postfächer anlegen, ändern, löschen – Passwörter verlassen den Server nie
   .get("/mail/accounts", (c) => c.json(publicAccounts()))
   .post("/mail/accounts", async (c) => c.json(changeAccounts(addAccount(store, accounts, (await c.req.json()) as AccountInput)), 201))
@@ -251,7 +265,10 @@ const api = new Hono()
   // Verbindung prüfen, ohne zu speichern – leeres Passwort: das gespeicherte des Postfachs `nr`
   .post("/mail/accounts/test", async (c) => {
     const body = (await c.req.json()) as AccountInput & { nr?: number };
-    const password = body.password || accounts.find((a) => a.nr === body.nr)?.password || "";
+    // gespeichertes Passwort nur für denselben Server und Benutzer – nie an einen anderen Host schicken
+    const stored = accounts.find((a) => a.nr === body.nr && a.host === body.host?.trim() && a.user === body.user?.trim());
+    const password = body.password || stored?.password || "";
+    if (!password) return c.json({ ok: false, folders: [], error: "Für einen anderen Server oder Benutzer das Passwort neu eingeben" });
     return c.json(await testConnection({ host: body.host, port: Number(body.port) || 993, user: body.user, password, folder: body.folder || "INBOX" }));
   })
   .get("/mails", async (c) => {
@@ -282,7 +299,8 @@ const api = new Hono()
     await pipeline.skip(uid(c));
     return c.json({ ok: true });
   })
-  .post("/run", async (c) => c.json(await pipeline.run(c.req.query("dryRun") === "1", { manual: true })))
+  // Testlauf: Entwürfe zeigen – veröffentlicht nichts
+  .post("/run", async (c) => c.json(await pipeline.run()))
   .post("/suggest", async (c) => c.json(await pipeline.suggest()))
   .get("/log", (c) => c.json(store.recentLog()))
   .get("/mails/:uid/trace", (c) => c.json(store.getTrace(uid(c))))
@@ -420,8 +438,8 @@ app.get("*", serveStatic({ path: "./web/dist/index.html" }));
 
 console.log(`Dashboard: http://${cfg.server.host}:${cfg.server.port}`);
 console.log(`Vorschläge: „${cfg.limits.suggestSchedule}“ – nächster ${at(suggestJob)}`);
-console.log(kalenderJob ? `Konzertkalender: „${kalenderCfg.schedule}“ – nächster ${at(kalenderJob)}` : "Konzertkalender: nur von Hand (KALENDER_AUTO=false)");
-console.log(publishJob ? `Veröffentlichen: „${cfg.limits.schedule}“ – nächstes ${at(publishJob)}` : "Automatisches Veröffentlichen ist aus (AUTO_PUBLISH=false)");
+console.log(kalenderJob ? `Konzertkalender: „${kalenderCfg.schedule}“ – nächster ${at(kalenderJob)}` : "Konzertkalender: nur von Hand");
+console.log("Veröffentlichen: nur nach deiner Freigabe im Dashboard");
 
 export default {
   hostname: cfg.server.host,

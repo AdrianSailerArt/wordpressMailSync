@@ -163,7 +163,11 @@ export class Mailboxes {
   private boxes = new Map<number, Mailbox>();
   private errors = new Map<number, string>();
 
-  constructor(accounts: MailAccount[], private maxAgeDays: number) {
+  /** maxAgeDays als Funktion: Änderungen in den Einstellungen gelten ab dem nächsten Abruf */
+  private maxAgeDays: () => number;
+
+  constructor(accounts: MailAccount[], maxAgeDays: number | (() => number)) {
+    this.maxAgeDays = typeof maxAgeDays === "number" ? () => maxAgeDays : maxAgeDays;
     this.setAccounts(accounts);
   }
 
@@ -220,7 +224,11 @@ export class Mailboxes {
 }
 
 export class Mailbox {
-  constructor(readonly cfg: ImapAccount, private maxAgeDays: number) {}
+  private maxAgeDays: () => number;
+
+  constructor(readonly cfg: ImapAccount, maxAgeDays: number | (() => number)) {
+    this.maxAgeDays = typeof maxAgeDays === "number" ? () => maxAgeDays : maxAgeDays;
+  }
 
   /** Öffnet eine Verbindung, sperrt den Ordner und schließt beides wieder. */
   private async withFolder<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
@@ -248,7 +256,7 @@ export class Mailbox {
    */
   candidates(done: Set<string> = new Set()): Promise<PressMail[]> {
     return this.withFolder(async (client) => {
-      const since = new Date(Date.now() - this.maxAgeDays * 86_400_000);
+      const since = new Date(Date.now() - this.maxAgeDays() * 86_400_000);
       const uids =
         (await client.search(
           { since, not: { or: [{ keyword: DONE_FLAG }, { keyword: SKIPPED_FLAG }] } },

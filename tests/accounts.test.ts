@@ -78,3 +78,10 @@ describe("Mailboxes", () => {
     await expect(new Mailboxes([], 7).candidates()).rejects.toThrow("Einstellungen");
   });
 });
+
+test("Postfach auf anderen Server umziehen: Passwort neu eingeben", () => {
+  const store = new Store(":memory:");
+  const list = addAccount(store, [], input);
+  expect(() => updateAccount(list, 0, { ...input, password: "", host: "imap.anders.example" })).toThrow("Passwort neu eingeben");
+  expect(updateAccount(list, 0, { ...input, password: "neu", host: "imap.anders.example" })[0]?.password).toBe("neu");
+});

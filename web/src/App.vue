@@ -10,6 +10,7 @@ import KalenderView from "./components/KalenderView.vue";
 import LogList from "./components/LogList.vue";
 import PageHeader from "./components/PageHeader.vue";
 import SettingsView from "./components/SettingsView.vue";
+import SetupWizard from "./components/SetupWizard.vue";
 
 type Tab = "postfach" | "kalender" | "verlauf" | "einstellungen";
 const tabs: { id: Tab; label: string; icon: IconName; hint: string }[] = [
@@ -35,6 +36,8 @@ const refreshKey = ref(0);
 /** irgendein laufender Modell-Durchlauf (z. B. vom Zeitplan) – für die Anzeige in der Seitenleiste */
 const activeRun = computed(() => Object.values(live.runs)[0] ?? null);
 const push = ref<PushState>("off");
+/** Einrichtung: öffnet sich von selbst, solange WordPress oder ein Postfach fehlt */
+const showSetup = ref<number | false>(false);
 const suggesting = ref(false);
 /** Mail, die per Benachrichtigung oder ?mail= geöffnet werden soll */
 const openUid = ref<number | null>(Number(new URLSearchParams(location.search).get("mail")) || null);
@@ -48,7 +51,6 @@ function shortDate(iso: string | null): string {
   return `${days === 0 ? "heute" : days === 1 ? "morgen" : d.toLocaleDateString("de-DE", { weekday: "short" })} ${time}`;
 }
 
-const todayShare = computed(() => (status.value ? Math.min(100, (status.value.today / Math.max(1, status.value.limit)) * 100) : 0));
 const pushLabel = computed(() => ({
   on: "Benachrichtigungen an",
   off: "Benachrichtigungen aus",
@@ -84,7 +86,7 @@ async function suggestNow() {
   suggesting.value = true;
   try {
     const r = await api.suggest();
-    runResult.value = { published: [], skipped: 0, dryRun: false, previews: [], message: r.message };
+    runResult.value = { skipped: 0, previews: [], message: r.message };
     if (r.suggested) openUid.value = r.suggested.uid;
     tab.value = "postfach";
     refreshKey.value++;
@@ -112,11 +114,12 @@ async function loadStatus() {
   }
 }
 
-async function run(dryRun: boolean) {
+/** Testlauf: Entwürfe zeigen – veröffentlicht nie */
+async function run() {
   running.value = true;
   runResult.value = null;
   try {
-    runResult.value = await api.run(dryRun);
+    runResult.value = await api.run();
     refreshKey.value++;
   } catch (e) {
     error.value = (e as Error).message;
@@ -132,6 +135,7 @@ const onChanged = loadStatus;
 let timer: ReturnType<typeof setInterval>;
 onMounted(() => {
   loadStatus();
+  api.setup().then((s) => (showSetup.value = s.needed ? 0 : false)).catch(() => {});
   connectLive();
   refreshPush();
   // Wer die Erlaubnis in den Website-Einstellungen ändert, soll das ohne Neuladen sehen
@@ -153,6 +157,7 @@ onUnmounted(() => {
 
 <template>
   <div class="min-h-dvh">
+    <SetupWizard v-if="showSetup !== false" :start="showSetup" @close="showSetup = false" @changed="loadStatus" />
     <!-- Seitenleiste (ab lg) -->
     <aside class="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-zinc-950 bg-paper lg:flex dark:border-white/30 dark:bg-paper-dark">
       <div class="px-5 pt-7 pb-8">
@@ -165,7 +170,7 @@ onUnmounted(() => {
 
       <nav class="flex-1 space-y-1.5 px-3">
         <button
-          v-for="(t, i) in tabs"
+          v-for="t in tabs"
           :key="t.id"
           class="group relative flex w-full cursor-pointer items-center gap-3 border px-3 py-2.5 text-left transition-all duration-200"
           :class="tab === t.id
@@ -174,7 +179,7 @@ onUnmounted(() => {
           :aria-current="tab === t.id ? 'page' : undefined"
           @click="tab = t.id"
         >
-          <span class="w-6 text-lg leading-none font-black tabular-nums" :class="tab === t.id ? 'text-brand-400 dark:text-brand-600' : 'text-brand-600 dark:text-brand-400'">{{ String(i + 1).padStart(2, "0") }}</span>
+          <Icon :name="t.icon" :size="20" class="shrink-0" :class="tab === t.id ? 'text-brand-400 dark:text-brand-600' : 'text-brand-600 dark:text-brand-400'" />
           <span class="min-w-0 flex-1">
             <span class="block text-sm font-bold">{{ t.label }}</span>
             <span class="block truncate text-[11px]" :class="tab === t.id ? 'text-white/60 dark:text-zinc-950/60' : 'text-zinc-500'">{{ t.hint }}</span>
@@ -201,19 +206,14 @@ onUnmounted(() => {
           </span>
         </button>
 
-        <div :title="`Richtwert: ${status.limit} pro Tag – der Zeitplan hält sich daran, von Hand darfst du mehr`">
-          <div class="flex items-baseline justify-between text-zinc-600 dark:text-zinc-400">
-            <span>Heute veröffentlicht</span>
-            <span class="text-base font-black tabular-nums" :class="status.today >= status.limit ? 'text-brand-600 dark:text-brand-400' : 'text-zinc-950 dark:text-white'">{{ status.today }}<span class="text-xs font-semibold text-zinc-500">/{{ status.limit }}</span></span>
-          </div>
-          <div class="mt-1.5 h-2 border border-zinc-950 dark:border-white/50">
-            <div class="h-full transition-all" :class="status.today >= status.limit ? 'bg-[#ffbf00]' : 'bg-brand-600'" :style="{ width: `${todayShare}%` }" />
-          </div>
+        <div class="flex items-baseline justify-between text-zinc-600 dark:text-zinc-400" title="Veröffentlicht wird nur, was du freigibst">
+          <span>Heute veröffentlicht</span>
+          <span class="text-base font-black tabular-nums text-zinc-950 dark:text-white">{{ status.today }}</span>
         </div>
 
         <dl class="grid grid-cols-2 gap-2 border-t border-zinc-950/15 pt-3 text-zinc-500 dark:border-white/15">
           <div><dt>Nächster Vorschlag</dt><dd class="mt-0.5 font-semibold tabular-nums text-zinc-950 dark:text-zinc-200">{{ shortDate(status.nextSuggestion) }}</dd></div>
-          <div v-if="status.config.autoPublish"><dt>Veröffentlichen</dt><dd class="mt-0.5 font-semibold tabular-nums text-zinc-950 dark:text-zinc-200">{{ shortDate(status.nextRun) }}</dd></div>
+          <div><dt>Veröffentlichen</dt><dd class="mt-0.5 font-semibold text-zinc-950 dark:text-zinc-200">nur mit Freigabe</dd></div>
         </dl>
 
         <button
@@ -235,7 +235,7 @@ onUnmounted(() => {
         <p class="text-sm leading-tight font-black tracking-tight uppercase">Bühnenpost</p>
         <p class="truncate text-[11px] text-zinc-600 dark:text-zinc-400">
           <template v-if="activeRun"><span class="font-semibold text-emerald-700 dark:text-emerald-400">● schreibt</span> · </template>
-          {{ status ? `heute ${status.today}/${status.limit}` : "…" }}
+          {{ status ? `heute ${status.today} veröffentlicht` : "…" }}
         </p>
       </div>
       <button class="btn btn-ghost btn-icon" :disabled="push === 'unsupported'" :title="pushLabel" @click="togglePush">
@@ -272,27 +272,18 @@ onUnmounted(() => {
               <button class="btn" :disabled="suggesting || running" title="Die beste neue Mail als Entwurf vorbereiten" @click="suggestNow">
                 <Icon name="sparkles" :class="suggesting && 'animate-pulse'" />{{ suggesting ? "Schreibt …" : "Vorschlag" }}
               </button>
-              <button class="btn" :disabled="running" title="Durchlauf ohne Veröffentlichen – zeigt, was passieren würde" @click="run(true)">
+              <button class="btn" :disabled="running" title="Entwürfe für die nächsten Mails zeigen – veröffentlicht nichts" @click="run()">
                 <Icon name="flask" />Testlauf
-              </button>
-              <button class="btn btn-primary" :disabled="running || !status" title="Durchlauf wie im Zeitplan: veröffentlicht bis zum Limit" @click="run(false)">
-                <Icon name="play" :class="running && 'animate-pulse'" />{{ running ? "Läuft …" : "Ausführen" }}
               </button>
             </template>
           </PageHeader>
 
           <section v-if="runResult" class="card mb-6">
             <div class="card-header">
-              <span class="badge" :class="runResult.dryRun ? 'badge-sky' : 'badge-brand'">{{ runResult.dryRun ? "Testlauf" : "Lauf" }}</span>
+              <span class="badge badge-sky">Testlauf</span>
               <p class="min-w-0 flex-1 text-sm">{{ runResult.message }}</p>
               <button class="btn btn-ghost btn-sm" @click="runResult = null"><Icon name="x" :size="14" />Schließen</button>
             </div>
-            <ul v-if="runResult.published.length" class="card-body space-y-1 text-sm">
-              <li v-for="p in runResult.published" :key="p.link" class="flex items-center gap-2">
-                <Icon name="check" class="text-emerald-600" />
-                <a :href="p.link" target="_blank" class="font-medium underline-offset-2 hover:underline">{{ p.title }}</a>
-              </li>
-            </ul>
             <article v-for="a in runResult.previews" :key="a.slug" class="prose prose-sm prose-zinc max-w-none border-t border-zinc-950 p-4 dark:prose-invert dark:border-white/30">
               <h2 class="!mt-0">{{ a.title }}</h2>
               <div v-html="a.content_html" />
@@ -309,7 +300,7 @@ onUnmounted(() => {
           <LogList :key="'log' + refreshKey" />
         </template>
 
-        <SettingsView v-else-if="status" :status="status" @changed="loadStatus" />
+        <SettingsView v-else-if="status" :status="status" @changed="loadStatus" @setup="(step) => (showSetup = step ?? 0)" />
       </div>
     </main>
 

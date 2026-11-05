@@ -44,7 +44,9 @@ const onHostInput = () => {
 // ---- Verbindung testen: Anmeldung, Ordnerliste, gewählter Ordner
 const test = ref<ConnectionTest | null>(null);
 const testing = ref(false);
-const canTest = computed(() => form.user.trim() && form.host.trim() && (form.password || props.account?.hasPassword));
+/** gespeichertes Passwort gilt nur für denselben Server und Benutzer */
+const storedPwUsable = computed(() => !!props.account?.hasPassword && form.host.trim() === props.account.host && form.user.trim() === props.account.user);
+const canTest = computed(() => form.user.trim() && form.host.trim() && (form.password || storedPwUsable.value));
 async function runTest() {
   testing.value = true;
   try {
@@ -92,7 +94,7 @@ async function save() {
       <div>
         <label class="label" for="acc-pw">Passwort</label>
         <input id="acc-pw" v-model="form.password" class="field" type="password" autocomplete="new-password"
-          :placeholder="account?.hasPassword ? 'unverändert' : 'App-Passwort'" :required="!account" />
+          :placeholder="storedPwUsable ? 'unverändert' : 'App-Passwort'" :required="!storedPwUsable" />
       </div>
     </div>
 

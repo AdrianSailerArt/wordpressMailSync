@@ -28,31 +28,33 @@ generierten Text **wortweise mit der Original-Mail vergleichen**, Titel/Meta/Tex
 ## So funktioniert's
 
 ```
-IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ──► (Dashboard: prüfen/bearbeiten) ──► WordPress
+IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ──► Dashboard: prüfen + FREIGEBEN ──► WordPress
       ▲                                                                                                  │
       └──────────────── Mail wird per IMAP-Keyword als erledigt/übersprungen markiert ◄──────────────────┘
 ```
 
-1. **Richtwert prüfen** – zählt die heute vom Bot-Benutzer angelegten Beiträge in WordPress.
-   Ist `DAILY_LIMIT` erreicht, veröffentlicht der Zeitplan nichts mehr. Manuell im Dashboard
-   („Veröffentlichen“, „Ausführen“) darfst du jederzeit mehr – der Wert ist nur ein Richtwert.
-2. **Mails holen** – alle unbearbeiteten Mails der letzten `MAX_AGE_DAYS` Tage, neueste
+**Bühnenpost veröffentlicht nie von selbst.** Jeder Beitrag geht erst nach WordPress, wenn du seinen
+Entwurf im Dashboard freigibst („Veröffentlichen“). Zeitplan, Testlauf und `bun run once` bereiten nur
+Entwürfe vor.
+
+1. **Mails holen** – alle unbearbeiteten Mails der letzten Tage (Einstellungen → Mails), neueste
    zuerst. Der Gelesen-Status bleibt unverändert.
-3. **Vorfilter** – Mails ohne Musik-Stichworte werden ohne KI-Aufruf übersprungen.
-4. **Sprachmodell, Stufe 1** – strenge Prüfung „Geht es um konkrete Musiker, Bands oder
+2. **Vorfilter** – Mails ohne Musik-Stichworte werden ohne KI-Aufruf übersprungen.
+3. **Sprachmodell, Stufe 1** – strenge Prüfung „Geht es um konkrete Musiker, Bands oder
    Festivals?“ (≈ 10 s). Technik-, Wirtschafts- und Startup-Meldungen fliegen hier raus.
-5. **Sprachmodell, Stufe 2** – schreibt den Beitrag nach dem
+4. **Sprachmodell, Stufe 2** – schreibt den Beitrag nach dem
    [Stil-Regelwerk](stil/regelwerk.md): Titel im Hausformat, SEO-Titel, Meta-Description,
    Fokus-Keyword, Zwischenüberschriften, Tourdaten, Kategorie und Tags (≈ 30–60 s).
-6. **Bilder** – Anhänge, eingebettete und verlinkte Bilder der Mail werden gesammelt; Logos,
+5. **Bilder** – Anhänge, eingebettete und verlinkte Bilder der Mail werden gesammelt; Logos,
    Icons, Banner und Tracking-Pixel fliegen nach Größe raus. Das größte Bild wird Thumbnail,
    im Dashboard lässt sich das ändern und weitere Bilder in den Text einfügen.
    **YouTube-Videos** werden erkannt – auch hinter Klick-Zählern von Newsletter-Diensten – und
    **cookiefrei** eingebunden: eigenes Vorschaubild in der Mediathek, verlinkt auf YouTube. Beim
    Seitenaufruf wird nichts von Google geladen. Standard: das erste Video der Mail.
-7. **Link-Filter** – Download-, Presseordner- und Hörproben-Links (WeTransfer, Dropbox, private
+6. **Link-Filter** – Download-, Presseordner- und Hörproben-Links (WeTransfer, Dropbox, private
    SoundCloud-Links, ZIP/MP3/PDF …) sowie YouTube-URLs werden aus dem Text entfernt.
-8. **WordPress** – Beitrag mit Kategorie, Tags, Auszug, Yoast-Feldern, Beitragsbild und
+7. **Freigabe** – du prüfst und bearbeitest den Entwurf im Dashboard und klickst „Veröffentlichen“.
+8. **WordPress** – erst dann: Beitrag mit Kategorie, Tags, Auszug, Yoast-Feldern, Beitragsbild und
    optional Bildern im Text.
 9. **Merken** – erledigte Mails stehen in der lokalen Datenbank (zusätzlich IMAP-Keyword, wo
    der Server das erlaubt) – nichts wird doppelt verarbeitet.
@@ -62,8 +64,7 @@ IMAP-Postfach ──► Vorfilter ──► Ollama: relevant? + Umschreiben ─�
 Postfächer richtest du im Dashboard unter *Einstellungen → Postfächer* ein: Mail-Adresse und Passwort
 eintragen, der IMAP-Server wird erkannt (bekannte Anbieter, DNS), „Verbindung testen“ prüft die Anmeldung
 und lädt die Ordner zur Auswahl. Gespeichert wird in der lokalen Datenbank, Passwörter gehen nie ans
-Dashboard zurück. Stehen noch `IMAP_*`-Einträge in der `.env`, werden sie beim ersten Start einmal
-übernommen und danach nicht mehr gelesen. Fällt ein Postfach aus, laufen die anderen weiter; das
+Dashboard zurück. Fällt ein Postfach aus, laufen die anderen weiter; das
 Dashboard zeigt den Fehler.
 
 Dieselbe Pressemitteilung in mehreren Postfächern wird **zusammengefasst** („2× erhalten“) –
@@ -76,13 +77,15 @@ Exemplare. Kommt ein Exemplar erst später an, wird es automatisch als Dublette 
 
 ### Zeitpläne
 
-| Was | Standard | Einstellung |
-|---|---|---|
-| Vorschlag erzeugen + Chrome-Benachrichtigung | 10× täglich (8, 9, 11, 12, 14, 15, 17, 18, 20, 21 Uhr) | `SUGGEST_SCHEDULE` |
-| Automatisch veröffentlichen (max. 1 pro Lauf, 3 pro Tag) | 8, 13, 18 Uhr | `SCHEDULE`, abschalten mit `AUTO_PUBLISH=false` |
+| Was | Standard |
+|---|---|
+| Vorschlag (Entwurf) erzeugen + Chrome-Benachrichtigung | 10× täglich (8, 9, 11, 12, 14, 15, 17, 18, 20, 21 Uhr) |
+
+Veröffentlicht wird von keinem Zeitplan – nur durch deine Freigabe. Zeiten und Zeitzone stellst du
+unter *Einstellungen → Vorschläge und Zeitpläne* ein; Änderungen gelten sofort.
 
 **Der Mac muss dafür an und wach sein**; verpasste Läufe werden nicht nachgeholt. Im
-Dashboard lassen sich beide jederzeit von Hand auslösen („Vorschlag“, „Ausführen“).
+Dashboard geht es jederzeit von Hand („Vorschlag“, „Testlauf“).
 
 ### Chrome-Benachrichtigungen
 
@@ -103,9 +106,9 @@ Dashboard-Tab geschlossen ist (Chrome muss laufen). Ein Klick öffnet direkt den
   die Beiträge dieses Benutzers).
 - Als dieser Benutzer: *Profil → Anwendungspasswörter* → neues Passwort erzeugen.
 - Für SEO-Felder: [`wordpress/pressbot-seo-meta.php`](wordpress/pressbot-seo-meta.php) nach
-  `wp-content/mu-plugins/` kopieren und `SEO_PLUGIN=yoast` oder `rankmath` setzen.
-- Kategorien über den Slug zuordnen, weil Namen wie „News“ oft mehrfach vorkommen:
-  `WP_CATEGORIES=News=music-news,Events=events`.
+  `wp-content/mu-plugins/` kopieren – die Einrichtung erkennt Yoast bzw. Rank Math selbst.
+- Kategorien wählst du in der Einrichtung per Klick; sie werden über den Slug zugeordnet, weil Namen wie
+  „News“ oft mehrfach vorkommen.
 - Liefert die REST-API trotz Anwendungspasswort „rest_login_required“, reicht der Server die
   Anmeldung nicht weiter (z. B. bei DomainFactory). Dann am Anfang der `.htaccess` ergänzen:
   ```apache
@@ -120,13 +123,25 @@ Dashboard-Tab geschlossen ist (Chrome muss laufen). Ein Klick öffnet direkt den
 
 ```bash
 bun install
-cp .env.example .env      # WordPress-Zugang eintragen – Postfächer dann im Dashboard
 bun run start             # Dashboard bauen + Server mit Zeitplan → http://127.0.0.1:3210
 ```
 
+Beim ersten Öffnen führt die **Einrichtung** durch Website, WordPress (mit Verbindungstest, Kategorien zum
+Anklicken und erkanntem SEO-Plugin), Postfächer, Sprachmodell und Konzertkalender. API-Keys für Claude,
+ChatGPT und Ticketmaster sind optional. Alles Weitere – Zeitpläne, Limits, Zeitzone, Server-Adressen der
+Modelle, Konzertkalender, Dashboard-Passwort, Adresse und Port – steht unter *Einstellungen*.
+
+**Eine `.env` braucht es nicht.** Alles liegt in der lokalen Datenbank (`data/pressbot.sqlite`). Gibt es
+noch eine `.env` aus älteren Versionen, wird sie beim ersten Start einmal komplett übernommen (Postfächer,
+Zugänge, Keys, Zeitpläne, Modellwahl); danach zeigt das Dashboard einen Hinweis, dass sie gelöscht werden
+kann. Nur zwei Startparameter bleiben, weil sie vor der Datenbank feststehen müssen: `DB_PATH` und
+`DATA_DIR` (Standard `data/`). `HOST`/`PORT` beim Start gehen vor den Einstellungen – praktisch für einen
+zweiten Server daneben.
+
 Ohne Zugangsdaten ausprobieren (Beispiel-Mails, simuliertes WordPress): `DEMO=1 bun run start`
 
-Für die ersten echten Läufe empfiehlt sich `WP_STATUS=draft`, um die Texte zu prüfen.
+Für die ersten echten Läufe empfiehlt sich *Neue Beiträge: als Entwurf* (Einstellungen → WordPress), um die
+Texte zu prüfen.
 
 ### 4. Automatisch beim Anmelden starten (optional)
 
@@ -162,10 +177,10 @@ Ticketmaster Discovery API ─────────────────�
    Länder und Link „Alle Konzerte“ einstellbar) – oder überall kompakt per Shortcode:
    `[konzertkalender kompakt="ja" anzahl="8" link="/konzerte/"]`.
 3. Optional einen kostenlosen Ticketmaster-Schlüssel holen ([developer.ticketmaster.com](https://developer.ticketmaster.com),
-   „Consumer Key“) und als `TICKETMASTER_API_KEY` in die `.env` eintragen. Ohne Schlüssel wird Ticketmaster übersprungen.
+   „Consumer Key“) und unter *Einstellungen → API-Keys* eintragen. Ohne Schlüssel wird Ticketmaster übersprungen.
 4. Probelauf ohne Übertragen: `bun run kalender --dry-run` – einzelne Quellen: `bun run kalender --dry-run vaddi jazzhaus`.
-5. Übertragen: `bun run kalender`. Täglich automatisch mit `KALENDER_AUTO=true` (Standard 6:30 Uhr,
-   `KALENDER_SCHEDULE`), solange der Server läuft. Im Dashboard-Server auch über `POST /api/kalender/run`.
+5. Übertragen: `bun run kalender`. Täglich automatisch: *Einstellungen → Konzertkalender* (Standard 6:30 Uhr),
+   solange der Server läuft. Im Dashboard-Server auch über `POST /api/kalender/run`.
 
 **Quellen** stehen in [`kalender/quellen.json`](kalender/quellen.json). Locations pflegst du am einfachsten im
 Dashboard unter *Konzertkalender → Quellen → + Location* (bearbeiten über den Stift): Adresse der Programm-Seite
@@ -180,8 +195,8 @@ Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen
 **Wie verlässlich ist das?**
 
 - Das Sprachmodell darf nur Termine liefern, deren Datum und Künstler sich im Seitentext wiederfinden;
-  Vergangenes fliegt raus. Trotzdem lohnt anfangs ein Blick – oder `KALENDER_STATUS=draft`, dann sind neue
-  Termine in WordPress erst Entwurf.
+  Vergangenes fliegt raus. Trotzdem lohnt anfangs ein Blick – oder *Neue Termine: erst als Entwurf*
+  (Einstellungen → Konzertkalender).
 - Fehlerhafte Termine in WordPress korrigieren und *„Nicht automatisch überschreiben“* anhaken – dann lässt
   der Abruf sie in Ruhe. Ausblenden: Termin auf Entwurf setzen, das bleibt beim nächsten Abruf so.
 - Liefert eine Quelle keine Termine oder einen Fehler, bleiben ihre bisherigen Termine stehen. Sonst ersetzt jeder
@@ -204,7 +219,7 @@ Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen
 | Befehl | Zweck |
 |---|---|
 | `bun run serve` | nur Server starten, ohne das Dashboard neu zu bauen |
-| `bun run once` / `bun run once --dry-run` | einmaliger Lauf ohne Dashboard |
+| `bun run once` | Testlauf ohne Dashboard: zeigt Entwürfe, veröffentlicht nichts |
 | `bun run kalender` / `--dry-run` | Konzertkalender abrufen und übertragen |
 | `bun run kalender:plugin` | WordPress-Plugin als Zip zum Hochladen |
 | `bun run dev` | Entwicklung mit Hot-Reload (Dashboard auf :5173) |
@@ -226,16 +241,16 @@ Quellen entscheidet bei Dubletten: Termine weiter oben bleiben, spätere Quellen
   Dauer, Tokens und Geschwindigkeit. Jeder Entwurf merkt sich, welches Modell ihn geschrieben hat.
 - Erfahrung: `gemma3:4b` ist nicht schneller fertig als `gemma4` und schreibt teils auf Englisch.
 - MLX (Apple Silicon): `mlx_lm.server --port 8080` starten, dann im Dashboard „MLX“ wählen
-  (Adresse über `MLX_URL`). Gelistet werden die heruntergeladenen MLX-Modelle. MLX erzwingt kein JSON-Schema – das Schema steht in
+  (Adresse unter *Einstellungen → Server der Sprachmodelle*). Gelistet werden die heruntergeladenen MLX-Modelle. MLX erzwingt kein JSON-Schema – das Schema steht in
   der Anweisung, ungültige Antworten werden einmal neu angefragt.
-- OpenCode: `opencode serve --port 4096` starten, dann im Dashboard „OpenCode“ wählen (Adresse über
-  `OPENCODE_URL`). Gelistet werden alle Modelle der in OpenCode eingerichteten Anbieter
+- OpenCode: `opencode serve --port 4096` starten, dann im Dashboard „OpenCode“ wählen (Adresse unter
+  *Einstellungen → Server der Sprachmodelle*). Gelistet werden alle Modelle der in OpenCode eingerichteten Anbieter
   (`opencode auth login`), ohne Anmeldung die Gratis-Modelle. Meldet OpenCode ein Limit (z. B.
   „Free usage exceeded“), bricht die App sofort mit dieser Meldung ab, statt zu warten.
-- ChatGPT: `OPENAI_API_KEY` (platform.openai.com) in der `.env` setzen, dann ist „ChatGPT“ wählbar.
+- ChatGPT: Key von platform.openai.com unter *Einstellungen → API-Keys* eintragen, dann ist „ChatGPT“ wählbar.
   Gelistet werden die Text-Chatmodelle deines OpenAI-Kontos; das JSON-Schema erzwingt OpenAI selbst.
   Abgerechnet wird nach Tokens, unabhängig vom ChatGPT-Abo.
-- Claude: `ANTHROPIC_API_KEY` in der `.env` setzen, dann ist „Claude“ im Dashboard wählbar.
+- Claude: Key unter *Einstellungen → API-Keys* eintragen, dann ist „Claude“ im Dashboard wählbar.
 
 ## Stil-Regelwerk
 

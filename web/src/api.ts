@@ -130,11 +130,9 @@ export interface MailboxStatus {
 }
 
 export interface Status {
+  /** heute veröffentlicht – nur zur Anzeige */
   today: number;
-  limit: number;
   busy: boolean;
-  schedule: string;
-  nextRun: string | null;
   nextSuggestion: string | null;
   pushSubscribers: number;
   config: {
@@ -147,7 +145,6 @@ export interface Status {
     categories: string[];
     timezone: string;
     perRun: number;
-    autoPublish: boolean;
     provider: "ollama" | "mlx" | "opencode" | "openai" | "claude";
     activeModel: string;
     suggestSchedule: string;
@@ -163,10 +160,9 @@ export interface LogEntry {
   link: string;
 }
 
+/** Testlauf: Entwürfe zur Ansicht – veröffentlicht wird nur, was der Benutzer freigibt */
 export interface RunResult {
-  published: { title: string; link: string }[];
   skipped: number;
-  dryRun: boolean;
   previews: Article[];
   message: string;
 }
@@ -256,6 +252,47 @@ export interface KalenderQuelle {
   land?: string;
 }
 
+/** Einstellungen, wie sie das Dashboard sieht – ohne Passwörter und Keys */
+export interface Setup {
+  done: boolean;
+  /** WordPress oder Postfach fehlt → Einrichtung öffnet sich von selbst */
+  needed: boolean;
+  site: { name: string; tone: string };
+  wp: {
+    url: string; user: string; hasAppPassword: boolean; categories: string;
+    seoPlugin: "yoast" | "rankmath" | "none"; status: "publish" | "draft" | "pending"; featuredImage: boolean; ready: boolean;
+  };
+  mail: { maxAgeDays: number };
+  limits: { perRun: number; timezone: string; suggestSchedule: string };
+  llm: { ollamaUrl: string; mlxUrl: string; opencodeUrl: string; openaiUrl: string; claudeModel: string };
+  kalender: { status: "publish" | "draft"; auto: boolean; schedule: string } | null;
+  server: { host: string; port: number; hasPassword: boolean; fromEnv: { host: boolean; port: boolean } };
+  keys: { anthropic: boolean; openai: boolean; ticketmaster: boolean };
+  mailAccounts: number;
+}
+type Patch<T> = { [K in keyof T]?: T[K] extends object ? Patch<T[K]> : T[K] };
+/** Geheimnisse: leer = behalten, null = löschen */
+export interface SetupInput {
+  site?: Patch<Setup["site"]>;
+  wp?: Patch<Omit<Setup["wp"], "hasAppPassword" | "ready">> & { appPassword?: string | null };
+  mail?: Patch<Setup["mail"]>;
+  limits?: Patch<Setup["limits"]>;
+  llm?: Patch<Setup["llm"]>;
+  kalender?: Patch<NonNullable<Setup["kalender"]>>;
+  server?: { host?: string; port?: number; password?: string | null };
+  keys?: { anthropic?: string | null; openai?: string | null; ticketmaster?: string | null };
+  done?: boolean;
+}
+export interface WpTest {
+  ok: boolean;
+  error?: string;
+  name?: string;
+  canPublish?: boolean;
+  categories: { name: string; slug: string; count: number }[];
+  seoPlugin?: Setup["wp"]["seoPlugin"];
+  kalender?: boolean;
+}
+
 /** Postfach, wie es das Dashboard sieht – das Passwort bleibt auf dem Server */
 export interface MailAccount {
   nr: number;
@@ -329,7 +366,7 @@ export const api = {
   saveDraft: (uid: number, article: Article) => call<Article>("PUT", `/mails/${uid}/draft`, article),
   publish: (uid: number) => call<{ id: number; link: string }>("POST", `/mails/${uid}/publish`),
   skip: (uid: number) => call<{ ok: true }>("POST", `/mails/${uid}/skip`),
-  run: (dryRun: boolean) => call<RunResult>("POST", `/run${dryRun ? "?dryRun=1" : ""}`),
+  run: () => call<RunResult>("POST", "/run"),
   suggest: () => call<{ suggested: { uid: number; title: string } | null; message: string }>("POST", "/suggest"),
   images: (uid: number) => call<MailImages>("GET", `/mails/${uid}/images`),
   imageUrl: (uid: number, id: string) => `/api/mails/${uid}/images/${id}`,
@@ -350,6 +387,10 @@ export const api = {
   addLocation: (l: LocationInput) => call<KalenderQuelle>("POST", "/kalender/quellen", l),
   updateLocation: (id: string, l: LocationInput) => call<KalenderQuelle>("PUT", `/kalender/quellen/${encodeURIComponent(id)}`, l),
   /** id: beim Bearbeiten die eigene Quelle, damit sie nicht als „schon eingetragen“ gilt */
+  setup: () => call<Setup>("GET", "/setup"),
+  saveSetup: (s: SetupInput) => call<Setup>("PUT", "/setup", s),
+  /** ohne Passwort: das gespeicherte */
+  testWordPress: (wp: { url: string; user: string; appPassword?: string }) => call<WpTest>("POST", "/setup/wordpress/test", wp),
   mailAccounts: () => call<MailAccount[]>("GET", "/mail/accounts"),
   addMailAccount: (a: MailAccountInput) => call<MailAccount[]>("POST", "/mail/accounts", a),
   updateMailAccount: (nr: number, a: MailAccountInput) => call<MailAccount[]>("PUT", `/mail/accounts/${nr}`, a),
