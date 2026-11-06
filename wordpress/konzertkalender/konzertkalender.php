@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Konzertkalender
  * Description: Konzerttermine aus der Region (Freiburg, Karlsruhe, Schweiz) – werden über die REST-API befüllt und per Shortcode [konzertkalender] als Liste angezeigt.
- * Version: 0.4.0
+ * Version: 0.5.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: konzertkalender
@@ -265,6 +265,26 @@ function kk_render_compact($events, $more_url = '', $hinweis = '') {
     return ob_get_clean();
 }
 
+/** „‹ Oktober · November 2026 (54 Konzerte) · Dezember ›“ – blättert monatsweise, Suche und Ort bleiben. */
+function kk_month_nav($month, $months, $count, $params) {
+    $page = get_permalink() ?: home_url('/');
+    $link = function ($m, $label) use ($page, $params) {
+        $args = array_merge(kk_keep_params(), array_filter($params, 'strlen'), ['kk_monat' => $m]);
+        return sprintf('<a href="%s">%s</a>', esc_url(add_query_arg($args, $page)), $label);
+    };
+    $i = array_search($month, $months, true);
+    $prev = $i !== false && $i > 0 ? $months[$i - 1] : '';
+    $next = $i !== false && $i < count($months) - 1 ? $months[$i + 1] : '';
+    $name = function ($m) { return esc_html(date_i18n('F', strtotime($m . '-15'))); };
+    return sprintf(
+        '<nav class="kk-months" aria-label="Monat"><span class="kk-m-prev">%s</span><strong>%s <small>%d %s</small></strong><span class="kk-m-next">%s</span></nav>',
+        $prev !== '' ? $link($prev, '&lsaquo; ' . $name($prev)) : '',
+        esc_html(date_i18n('F Y', strtotime($month . '-15'))),
+        $count, $count === 1 ? 'Konzert' : 'Konzerte',
+        $next !== '' ? $link($next, $name($next) . ' &rsaquo;') : ''
+    );
+}
+
 /** Kleinbuchstaben ohne Akzente – damit „Zürich“ auch mit „zurich“ gefunden wird. */
 function kk_fold($text) {
     $text = remove_accents((string) $text);
@@ -290,7 +310,8 @@ function kk_keep_params() {
 
 /**
  * [konzertkalender tage="90" land="DE,CH" ort="Freiburg,Basel" location="Jazzhaus" limit="500" filter="ja"]
- * filter="ja" zeigt Suche, Monat und Ort (über ?kk_q=…&kk_monat=2026-12&kk_ort=… in der Adresse).
+ * filter="ja" zeigt Suche, Monat und Ort (über ?kk_q=…&kk_monat=2026-12&kk_ort=… in der Adresse) und
+ * startet mit dem aktuellen Monat; kk_monat=alle zeigt alle Monate, eine Suche durchsucht das ganze Jahr.
  * kompakt="ja" anzahl="8" link="/konzerte/" – kurze Liste der nächsten Konzerte, z. B. für die Seitenleiste.
  * hinweis="…" eigener Haftungshinweis, hinweis="aus" blendet ihn aus.
  */
@@ -302,20 +323,27 @@ function kk_shortcode($atts) {
     $show_filter = in_array(strtolower($atts['filter']), ['1', 'ja', 'true', 'yes'], true);
     $get = function ($k) { return isset($_GET[$k]) && is_string($_GET[$k]) ? sanitize_text_field(wp_unslash($_GET[$k])) : ''; };
     $q = $show_filter ? $get('kk_q') : '';
-    $month = $show_filter && preg_match('/^\d{4}-\d{2}$/', $get('kk_monat')) ? $get('kk_monat') : '';
     $city = $show_filter ? $get('kk_ort') : '';
-    $filtered = $q !== '' || $month !== '' || $city !== '';
+    // Mit Filter startet die Liste im aktuellen Monat – sonst wird sie sehr lang. Eine Suche ohne
+    // gewählten Monat durchsucht das ganze Jahr, „alle“ zeigt alle Monate.
+    $current = wp_date('Y-m');
+    $chosen = $get('kk_monat');
+    if (!$show_filter || $chosen === 'alle') $month = '';
+    elseif (preg_match('/^\d{4}-\d{2}$/', $chosen)) $month = $chosen;
+    else $month = $q !== '' ? '' : $current;
+    $filtered = $q !== '' || $city !== '' || ($chosen !== '' && $month !== $current);
 
     // Für die Auswahl ein Jahr im Voraus laden; ohne Monat und Suche werden nur die nächsten `tage` Tage gezeigt
     $days = (int) $atts['tage'];
     $all = kk_query($show_filter ? array_merge($atts, ['tage' => max($days, 365), 'limit' => 2000]) : $atts);
     $until = wp_date('Y-m-d', time() + $days * DAY_IN_SECONDS);
     $words = array_values(array_filter(preg_split('/\s+/', kk_fold($q))));
-    $events = array_values(array_filter($all, function ($e) use ($month, $city, $words, $until, $q) {
+    $all_months = $chosen === 'alle';
+    $events = array_values(array_filter($all, function ($e) use ($month, $city, $words, $until, $q, $all_months) {
         if ($month !== '') {
             if (substr($e['date'], 0, 7) !== $month) return false;
-        } elseif ($q === '' && $e['date'] > $until) {
-            return false; // eine Suche durchsucht das ganze Jahr
+        } elseif ($q === '' && !$all_months && $e['date'] > $until) {
+            return false; // eine Suche und „alle Monate“ umfassen das ganze Jahr
         }
         if ($city !== '' && $e['city'] !== $city) return false;
         return !$words || kk_matches($e, $words);
@@ -326,13 +354,17 @@ function kk_shortcode($atts) {
     if ($show_filter) {
         $cities = array_unique(array_filter(array_map(function ($e) { return $e['city']; }, $all)));
         sort($cities, SORT_LOCALE_STRING);
-        $months = array_unique(array_map(function ($e) { return substr($e['date'], 0, 7); }, $all));
+        $months = array_unique(array_merge([$current], array_map(function ($e) { return substr($e['date'], 0, 7); }, $all)));
         sort($months);
         echo '<form class="kk-filter" method="get" role="search">';
         foreach (kk_keep_params() as $k => $v) printf('<input type="hidden" name="%s" value="%s">', esc_attr($k), esc_attr($v));
         printf('<label class="kk-f-search"><span>Suche</span><input type="search" name="kk_q" value="%s" placeholder="Band, Künstler, Location …"></label>', esc_attr($q));
-        printf('<label><span>Monat</span><select name="kk_monat" onchange="this.form.submit()"><option value="">nächste %d Tage</option>', $days);
-        foreach ($months as $m) printf('<option value="%s"%s>%s</option>', esc_attr($m), selected($m, $month, false), esc_html(date_i18n('F Y', strtotime($m . '-15'))));
+        // leerer Wert = aktueller Monat (bzw. ganzes Jahr bei einer Suche)
+        printf('<label><span>Monat</span><select name="kk_monat" onchange="this.form.submit()"><option value="">%s</option>', esc_html(date_i18n('F Y', strtotime($current . '-15'))));
+        foreach ($months as $m) {
+            if ($m !== $current) printf('<option value="%s"%s>%s</option>', esc_attr($m), selected($m, $chosen, false), esc_html(date_i18n('F Y', strtotime($m . '-15'))));
+        }
+        printf('<option value="alle"%s>alle Monate</option>', selected('alle', $chosen, false));
         echo '</select></label>';
         echo '<label><span>Ort</span><select name="kk_ort" onchange="this.form.submit()"><option value="">alle Orte</option>';
         foreach ($cities as $c) printf('<option value="%1$s"%2$s>%1$s</option>', esc_attr($c), selected($c, $city, false));
@@ -343,7 +375,11 @@ function kk_shortcode($atts) {
             printf('<a class="kk-f-reset" href="%s">Filter zurücksetzen</a>', esc_url(add_query_arg(kk_keep_params(), $page)));
         }
         echo '</form>';
-        if ($filtered) printf('<p class="kk-f-count">%d %s gefunden</p>', count($events), count($events) === 1 ? 'Konzert' : 'Konzerte');
+        if ($month !== '') {
+            echo kk_month_nav($month, $months, count($events), ['kk_q' => $q, 'kk_ort' => $city]);
+        } elseif ($filtered) {
+            printf('<p class="kk-f-count">%d %s gefunden</p>', count($events), count($events) === 1 ? 'Konzert' : 'Konzerte');
+        }
     }
     if (!$events) {
         echo $filtered ? '<p class="kk-empty">Keine Konzerte für diese Auswahl.</p>' : '<p class="kk-empty">Zurzeit sind keine Konzerte eingetragen.</p>';
@@ -357,18 +393,21 @@ function kk_shortcode($atts) {
             if ($day !== null) echo '</ul>';
             $day = $e['date'];
             $ts = strtotime($day . ' 12:00:00');
-            printf('<h3 class="kk-day"><time datetime="%s">%s</time></h3><ul class="kk-list">', esc_attr($day), esc_html(date_i18n('l, j. F Y', $ts)));
+            printf('<h3 class="kk-day"><time datetime="%s">%s</time></h3><ul class="kk-list">', esc_attr($day), esc_html(date_i18n('D, j. F', $ts)));
         }
         $artists = $e['artists'] ?: [$e['title']];
         $place = implode(', ', array_filter([$e['venue'], $e['city']]));
         if ($e['country'] && $e['country'] !== 'DE') $place .= ' (' . $e['country'] . ')';
+        // eine Zeile je Termin: Uhrzeit | Künstler · Ort (+ Infos einzeilig) | Link
         echo '<li class="kk-event">';
-        if ($e['time'] !== '') printf('<span class="kk-time">%s&nbsp;Uhr</span> ', esc_html($e['time']));
+        printf('<span class="kk-time">%s</span>', esc_html($e['time']));
+        echo '<span class="kk-main">';
         printf('<strong class="kk-artists">%s</strong>', esc_html(implode(', ', $artists)));
         if ($e['status'] !== '') printf(' <span class="kk-status">%s</span>', esc_html($e['status']));
         if ($place !== '') printf('<span class="kk-place">%s</span>', esc_html($place));
-        if ($e['info'] !== '') printf('<span class="kk-info">%s</span>', nl2br(esc_html($e['info'])));
-        if ($e['url'] !== '') printf('<a class="kk-link" href="%s" target="_blank" rel="noopener nofollow">Infos &amp; Tickets beim Veranstalter</a>', esc_url($e['url']));
+        if ($e['info'] !== '') printf('<span class="kk-info" title="%1$s">%1$s</span>', esc_attr(preg_replace('/\s+/', ' ', $e['info'])));
+        echo '</span>';
+        if ($e['url'] !== '') printf('<a class="kk-link" href="%s" target="_blank" rel="noopener nofollow" title="Infos &amp; Tickets beim Veranstalter" aria-label="Infos &amp; Tickets beim Veranstalter"><span class="kk-link-t">Tickets&nbsp;</span>&#8599;</a>', esc_url($e['url']));
         echo '</li>';
     }
     echo '</ul>';
@@ -380,14 +419,23 @@ function kk_shortcode($atts) {
 add_action('wp_head', function () {
     ?>
 <style id="konzertkalender-css">
-.konzertkalender .kk-day{margin:1.6em 0 .4em;font-size:1.1em}
+.konzertkalender .kk-day{margin:1.1em 0 .15em;padding:0;font-size:.82em;letter-spacing:.06em;text-transform:uppercase;opacity:.8}
 .konzertkalender .kk-list{list-style:none;margin:0;padding:0}
-.konzertkalender .kk-event{padding:.6em 0;border-bottom:1px solid rgba(127,127,127,.25)}
-.konzertkalender .kk-time{opacity:.75;margin-right:.3em}
-.konzertkalender .kk-status{font-size:.8em;padding:.1em .45em;border:1px solid currentColor;border-radius:3px;text-transform:uppercase}
-.konzertkalender .kk-place,.konzertkalender .kk-info{display:block;font-size:.92em}
-.konzertkalender .kk-info{opacity:.8}
-.konzertkalender .kk-link{font-size:.9em}
+.konzertkalender .kk-event{display:grid;grid-template-columns:3.2em minmax(0,1fr) auto;gap:0 .8em;align-items:baseline;padding:.32em 0;margin:0;border-bottom:1px solid rgba(127,127,127,.18);line-height:1.35}
+.konzertkalender .kk-time{font-size:.88em;opacity:.7;font-variant-numeric:tabular-nums}
+.konzertkalender .kk-main{min-width:0}
+.konzertkalender .kk-artists{font-weight:600}
+.konzertkalender .kk-place{font-size:.9em;opacity:.8}
+.konzertkalender .kk-place::before{content:" · "}
+.konzertkalender .kk-info{display:block;font-size:.8em;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.konzertkalender .kk-status{font-size:.68em;padding:.05em .4em;border:1px solid currentColor;border-radius:3px;text-transform:uppercase;vertical-align:.1em}
+.konzertkalender .kk-link{font-size:.8em;white-space:nowrap}
+.konzertkalender .kk-months{display:flex;align-items:baseline;justify-content:space-between;gap:1em;margin:0 0 .4em;padding:.35em 0;border-bottom:2px solid rgba(127,127,127,.3)}
+.konzertkalender .kk-months strong{font-size:1.05em}
+.konzertkalender .kk-months small{font-weight:400;font-size:.75em;opacity:.65;margin-left:.3em}
+.konzertkalender .kk-months a{font-size:.9em;text-decoration:none}
+.konzertkalender .kk-m-next{text-align:right}
+@media (max-width:600px){.konzertkalender .kk-event{grid-template-columns:2.9em minmax(0,1fr) auto;gap:0 .6em}.konzertkalender .kk-link-t{display:none}.konzertkalender .kk-link{font-size:1em;padding:0 .2em}}
 .konzertkalender .kk-filter{display:flex;flex-wrap:wrap;align-items:flex-end;gap:.6em 1em;margin:0 0 1.2em;padding:.9em 1em;border:1px solid rgba(127,127,127,.25);border-radius:6px}
 .konzertkalender .kk-filter label{display:flex;flex-direction:column;gap:.25em;font-size:.85em;margin:0}
 .konzertkalender .kk-filter label span{font-weight:600;opacity:.8}

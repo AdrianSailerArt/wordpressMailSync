@@ -40,18 +40,30 @@ test("erst Musik-Prüfung, dann Beitrag – Schema wird mitgeschickt, Ergebnis b
   expect(result.content_html).not.toContain("<script");
 });
 
-test("keine News (z. B. Werbung): kein Beitrag, nur ein Modellaufruf", async () => {
-  const spy = spyOn(globalThis, "fetch").mockResolvedValue(
-    reply(JSON.stringify({ artist: "", news: false, music_news: false, reason: "Bluetooth-Chip" })));
-  const result = await new Rewriter(cfg, ["News"]).rewrite({ ...mail, subject: "Nordic Semiconductor: Bluetooth" });
-  expect(spy).toHaveBeenCalledTimes(1);
-  expect(result.relevant).toBe(false);
-  expect(result.reason).toContain("Bluetooth-Chip");
+test("Vorprüfung meint „keine News“: trotzdem schreiben, mit Warnung statt Abbruch", async () => {
+  const check = JSON.stringify({ artist: "Pokémon TCG", news: false, music_news: false, reason: "Kartenspiel, keine Musik" });
+  const spy = spyOn(globalThis, "fetch").mockResolvedValueOnce(reply(check)).mockResolvedValueOnce(reply(article));
+  const result = await new Rewriter(cfg, ["News"]).rewrite({ ...mail, subject: "Neue Pokémon-TCG-Erweiterung" });
+  expect(spy).toHaveBeenCalledTimes(2);
+  expect(result).toMatchObject({ relevant: true, music: false });
+  expect(result.music_note).toContain("Kartenspiel, keine Musik");
+  expect(body(spy, 1).messages[0].content).toContain("Erfinde keinen Musikbezug");
 });
 
-test("Musik ohne benannten Künstler zählt nicht", async () => {
-  spyOn(globalThis, "fetch").mockResolvedValue(reply(JSON.stringify({ artist: " ", music_news: true, reason: "Release" })));
-  expect((await new Rewriter(cfg, ["News"]).rewrite(mail)).relevant).toBe(false);
+test("echter Ausschuss (z. B. Werbung): die Schreibstufe lehnt ab", async () => {
+  spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(reply(JSON.stringify({ artist: "", news: false, music_news: false, reason: "Bluetooth-Chip" })))
+    .mockResolvedValueOnce(reply(JSON.stringify({ relevant: false, reason: "Werbung ohne Neuigkeit" })));
+  const result = await new Rewriter(cfg, ["News"]).rewrite({ ...mail, subject: "Nordic Semiconductor: Bluetooth" });
+  expect(result.relevant).toBe(false);
+  expect(result.reason).toContain("Werbung");
+});
+
+test("Musik ohne benannten Künstler zählt nicht als Musik-News", async () => {
+  spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(reply(JSON.stringify({ artist: " ", music_news: true, reason: "Release" })))
+    .mockResolvedValueOnce(reply(article));
+  expect(await new Rewriter(cfg, ["News"]).rewrite(mail)).toMatchObject({ music: false });
 });
 
 test("News ohne Musikbezug (z. B. Gaming) wird geschrieben – mit Kennzeichen für die Warnung", async () => {
