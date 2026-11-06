@@ -89,9 +89,18 @@ Kategorie News.
 - Kurz halten (150–250 Wörter): Aufhänger, Datum und Location fett, ein Absatz zur Band,
   danach die Faktenzeilen „**Datum:** …“, „**Location:** …“ und die Ticket-Zeile.
 
+## Was eine Musik-News ist
+
+Entscheidend ist nur, dass es um Musik geht – eine Neuigkeit über Musik, Musiker, Bands, Komponisten
+oder Musik-Veranstaltungen. Ein Album, Tourdaten, Konzerte oder Tickets muss es dafür **nicht** geben.
+Auch Soundtracks und Filmmusik, Besetzungswechsel, Auszeichnungen oder Jubiläen sind Musik-News.
+Behandelt eine Mail mehrere Themen (z. B. Soundtrack, TV-Serie und Sport), schreiben wir nur über den
+Musik-Teil.
+
 ## Kein Musikthema
 
-Konsolen-/Videospiele, Technik, Filme gehören nicht in die Musik-Kategorien. Karaoke- oder
+Konsolen-/Videospiele, Technik, Filme und Serien ohne Musikbezug gehören nicht in die
+Musik-Kategorien – der Soundtrack zu einem Film oder einer Serie dagegen schon. Karaoke- oder
 Musikspiele sind Spiele, keine Musik-News.
 
 ## Abschluss

@@ -1,10 +1,10 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LlmEvents, type LlmEvent, type LlmTrace } from "../server/llm-events.ts";
 import type { LlmProvider } from "../server/config.ts";
-import { CancelledError, dropInventedDomains, extractJson, generateJson, germanQuotes, isLooping, parseArticle, Rewriter } from "../server/rewrite.ts";
+import { CancelledError, dropInventedDomains, extractJson, generateJson, germanQuotes, isLooping, parseArticle, Rewriter, styleGuideFor } from "../server/rewrite.ts";
 
 const cfg = {
   provider: "ollama" as LlmProvider, ollamaUrl: "http://ollama.test", ollamaModel: "gemma4",
@@ -359,4 +359,22 @@ test("erfundene Webadressen fliegen raus, Adressen aus der Mail bleiben", () => 
 
 test("gerade Anführungszeichen werden deutsch", () => {
   expect(germanQuotes('Die neue Single "Rauschgift" erscheint')).toBe("Die neue Single „Rauschgift“ erscheint");
+});
+
+test("Musik-News braucht weder Album noch Tourdaten – auch Soundtracks zählen", async () => {
+  const spy = spyOn(globalThis, "fetch").mockResolvedValueOnce(reply(music)).mockResolvedValueOnce(reply(article));
+  await new Rewriter(cfg, ["News"]).rewrite(mail);
+  const check = body(spy, 0).messages[0].content as string;
+  const write = body(spy, 1).messages[0].content as string;
+  expect(check).toContain("Soundtrack");
+  expect(check).toContain("weder ein Album noch Tourdaten");
+  expect(check).toContain("sobald einer der Teile von Musik handelt");
+  expect(write).toContain("Album, Tourdaten, Konzerte oder Tickets sind dafür NICHT nötig");
+  expect(write).toContain("nur über den Musik-Teil");
+});
+
+test("Regelwerk-Vorlage: Musik-News-Abschnitt gilt für jede Meldungsart, Soundtracks sind kein „Film“", () => {
+  const vorlage = readFileSync("stil/regelwerk.md", "utf8");
+  for (const art of ["tour", "album", "sonstiges"] as const) expect(styleGuideFor(vorlage, art)).toContain("## Was eine Musik-News ist");
+  expect(vorlage).toContain("der Soundtrack zu einem Film oder einer Serie dagegen schon");
 });

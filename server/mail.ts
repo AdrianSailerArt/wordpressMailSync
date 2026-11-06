@@ -11,7 +11,7 @@ export const SKIPPED_FLAG = "$PressbotSkipped";
 
 /** Grober Vorfilter, damit nicht jede Newsletter-Mail an Claude geht. */
 const KEYWORDS =
-  /tour|konzert|concert|live|festival|tickets?|album|single|\bep\b|release|veröffentlich|pressemitteilung|pressemeldung|press release|presseinfo|video|premiere|ankündig|announce|show|open\s?air/i;
+  /tour|konzert|concert|live|festival|tickets?|album|single|\bep\b|release|veröffentlich|pressemitteilung|pressemeldung|press release|presseinfo|video|premiere|ankündig|announce|show|open\s?air|soundtrack|filmmusik|score|musik|music|song|komponist|composer|band/i;
 
 const MAX_BODY_CHARS = 40_000;
 export const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];

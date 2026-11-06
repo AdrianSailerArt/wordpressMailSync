@@ -51,6 +51,8 @@ describe("Mail", () => {
 
   test("Vorfilter verwirft Rechnungen", async () => {
     expect(looksRelevant(await parseMessage(1, rawMail("Ihre Rechnung", "<p>Betrag fällig</p>")))).toBe(false);
+    // Soundtrack ohne Tour, Album oder Ticket kommt trotzdem beim Sprachmodell an
+    expect(looksRelevant(await parseMessage(1, rawMail("Neu: Original-Soundtrack zur Serie", "<p>Die Komponistin hat die Filmmusik geschrieben.</p>")))).toBe(true);
   });
 });
 
