@@ -1,14 +1,15 @@
 /** Bilder einer Mail sammeln (Anhänge, eingebettet, verlinkt), Logos/Icons aussortieren und lokal zwischenspeichern. */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { imageSize } from "image-size";
 import { IMAGE_TYPES, youtubeId, type ImageAttachment, type PressMail } from "./mail.ts";
 
 export interface ImageInfo {
   id: string;
-  origin: "anhang" | "eingebettet" | "verlinkt";
+  /** eigenes: nachträglich im Dashboard hochgeladen */
+  origin: "anhang" | "eingebettet" | "verlinkt" | "eigenes";
   filename: string;
   contentType: string;
   width: number;
@@ -210,6 +211,42 @@ export class ImageStore {
 
   videoThumbnail(video: VideoInfo): Promise<ImageAttachment | null> {
     return videoThumbnail(video);
+  }
+
+  /**
+   * Eigenes Bild nachträglich hinzufügen (z. B. als Beitragsbild). Steht vorn in der Liste; ohne die
+   * Mindestgrößen der Mail-Bilder – wer selbst hochlädt, weiß, was er tut.
+   */
+  async add(mail: PressMail, file: ImageAttachment): Promise<{ images: MailImages; image: ImageInfo }> {
+    if (!IMAGE_TYPES.includes(file.contentType)) throw new Error("Nur JPEG, PNG oder WebP");
+    if (file.data.length > MAX_BYTES) throw new Error("Bild ist zu groß (höchstens 15 MB)");
+    const dim = measure(file.data);
+    if (!dim) throw new Error("Das ist kein lesbares Bild");
+    const current = await this.collect(mail);
+    const folder = this.folder(mail.messageId);
+    const id = sha(file.data).slice(0, 12);
+    const existing = current.images.find((i) => i.id === id);
+    if (existing) return { images: current, image: existing };
+    const name = file.filename.replace(/[^\w.-]+/g, "_").replace(/^_+/, "") || `bild.${EXT[file.contentType]}`;
+    const image: ImageInfo = { id, origin: "eigenes", filename: name, contentType: file.contentType, width: dim.width, height: dim.height, bytes: file.data.length };
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, id), file.data);
+    const images = { ...current, images: [image, ...current.images] };
+    writeFileSync(join(folder, "index.json"), JSON.stringify({ version: CACHE_VERSION, ...images }));
+    return { images, image };
+  }
+
+  /** Eigenes Bild wieder entfernen – Bilder aus der Mail bleiben */
+  async remove(mail: PressMail, id: string): Promise<MailImages> {
+    const current = await this.collect(mail);
+    const image = current.images.find((i) => i.id === id);
+    if (!image) throw new Error("Bild nicht gefunden");
+    if (image.origin !== "eigenes") throw new Error("Nur selbst hochgeladene Bilder lassen sich entfernen");
+    const folder = this.folder(mail.messageId);
+    rmSync(join(folder, id), { force: true });
+    const images = { ...current, images: current.images.filter((i) => i.id !== id) };
+    writeFileSync(join(folder, "index.json"), JSON.stringify({ version: CACHE_VERSION, ...images }));
+    return images;
   }
 
   async read(mail: Pick<PressMail, "messageId">, id: string): Promise<(ImageInfo & { data: Buffer }) | null> {

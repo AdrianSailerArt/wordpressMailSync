@@ -152,6 +152,33 @@ describe("Bilder", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("eigenes Bild nachträglich: steht vorn, auch klein erlaubt, bleibt gespeichert, lässt sich entfernen", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wms-img-"));
+    try {
+      const mail: PressMail = { uid: 1, messageId: "<eigen@test>", subject: "", sender: "", date: "", body: "",
+        images: [{ filename: "bandfoto.png", contentType: "image/png", data: png(2400, 1600) }] };
+      const store = new ImageStore(dir);
+      const { image, images } = await store.add(mail, { filename: "Mein Thumbnail (1).png", contentType: "image/png", data: png(640, 360, 20_000) });
+      expect(image).toMatchObject({ origin: "eigenes", width: 640, height: 360, filename: "Mein_Thumbnail_1_.png" });
+      expect(images.images.map((i) => i.origin)).toEqual(["eigenes", "anhang"]);
+      // neu geladen (z. B. nach Neustart) ist es noch da
+      expect((await new ImageStore(dir).collect(mail)).images[0]?.id).toBe(image.id);
+      expect((await store.read(mail, image.id))?.data.length).toBe(20_000);
+      // dasselbe Bild nochmal: kein Duplikat
+      expect((await store.add(mail, { filename: "x.png", contentType: "image/png", data: png(640, 360, 20_000) })).images.images).toHaveLength(2);
+
+      await expect(store.add(mail, { filename: "x.gif", contentType: "image/gif", data: Buffer.from("GIF89a") })).rejects.toThrow("Nur JPEG, PNG oder WebP");
+      await expect(store.add(mail, { filename: "x.png", contentType: "image/png", data: Buffer.from("kein bild") })).rejects.toThrow("kein lesbares Bild");
+
+      const mailImage = images.images[1]!.id;
+      await expect(store.remove(mail, mailImage)).rejects.toThrow("Nur selbst hochgeladene");
+      expect((await store.remove(mail, image.id)).images.map((i) => i.origin)).toEqual(["anhang"]);
+      expect(await store.read(mail, image.id)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("Links und Videos", () => {

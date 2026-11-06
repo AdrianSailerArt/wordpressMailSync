@@ -21,6 +21,10 @@ export interface Article {
   generated_by: string;
   /** fehlt = automatisch das erste Video, [] = keins, sonst gewählte YouTube-IDs */
   videos?: string[];
+  /** false = News ohne Musikbezug (z. B. Gaming) – darf veröffentlicht werden, mit Warnung */
+  music?: boolean;
+  /** warum kein Musikbezug */
+  music_note?: string;
 }
 
 export interface WpCategory {
@@ -93,7 +97,8 @@ export interface LlmTrace {
 
 export interface ImageInfo {
   id: string;
-  origin: "anhang" | "eingebettet" | "verlinkt";
+  /** eigenes: nachträglich im Dashboard hochgeladen */
+  origin: "anhang" | "eingebettet" | "verlinkt" | "eigenes";
   filename: string;
   contentType: string;
   width: number;
@@ -117,6 +122,8 @@ export interface MailSummary {
   images: number;
   prefilter: boolean;
   hasDraft: boolean;
+  /** Entwurf ohne Musikbezug */
+  noMusic: boolean;
   /** Postfach, aus dem die Mail stammt */
   account: string;
   /** dieselbe Mail aus anderen Postfächern – zusammengefasst, wird mit erledigt */
@@ -378,6 +385,16 @@ export const api = {
   suggest: () => call<{ suggested: { uid: number; title: string } | null; message: string }>("POST", "/suggest"),
   images: (uid: number) => call<MailImages>("GET", `/mails/${uid}/images`),
   imageUrl: (uid: number, id: string) => `/api/mails/${uid}/images/${id}`,
+  /** eigenes Bild hochladen – featured=false: Entwurf auf dem Server nicht anfassen (das macht der Editor) */
+  uploadImage: async (uid: number, file: File, featured = false) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`/api/mails/${uid}/images${featured ? "" : "?featured=0"}`, { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+    return data as { images: MailImages; image: ImageInfo; article: Article | null };
+  },
+  removeImage: (uid: number, id: string) => call<{ images: MailImages; article: Article | null }>("DELETE", `/mails/${uid}/images/${id}`),
   testPush: () => call<{ ok: true }>("POST", "/push/test"),
   models: (provider?: LlmProvider) => call<ModelsResponse>("GET", `/llm/models${provider ? `?provider=${provider}` : ""}`),
   setModel: (provider: LlmProvider, model: string) => call<{ provider: LlmProvider; current: string }>("PUT", "/llm/model", { provider, model }),

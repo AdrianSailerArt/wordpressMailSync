@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Config } from "../server/config.ts";
 import { Store } from "../server/db.ts";
 import { DONE_FLAG, SKIPPED_FLAG, type PressMail } from "../server/mail.ts";
@@ -76,7 +76,10 @@ function pipeline() {
         rewrites++;
         return m.subject.includes("Newsletter")
           ? ArticleSchema.parse({ relevant: false, reason: "kein Inhalt" })
-          : ArticleSchema.parse({ relevant: true, reason: "", title: m.subject, slug: `post-${m.uid}`, category: "News" });
+          : ArticleSchema.parse({
+              relevant: true, reason: "", title: m.subject, slug: `post-${m.uid}`, category: "News",
+              ...(m.subject.includes("Gaming") && { music: false, music_note: "Videospiel" }),
+            });
       },
     },
     store: new Store(":memory:"),
@@ -178,4 +181,55 @@ test("Videos: automatisch das erste, sonst Auswahl oder keins", async () => {
   p.saveDraft(4, { ...draft, videos: [] });
   await p.publish(4);
   expect(postedVideos).toEqual([[]]);
+});
+
+
+describe("News ohne Musikbezug", () => {
+  const gamingMail = mail(5, "Gaming: Nebelwacht erscheint", "Release am 3. Dezember");
+  beforeEach(() => void MAILS.push(gamingMail));
+  afterEach(() => void MAILS.splice(MAILS.indexOf(gamingMail), 1));
+
+  test("darf nach Freigabe veröffentlicht werden – der Verlauf vermerkt es", async () => {
+    const p = pipeline();
+    await p.publish(5);
+    expect(created).toEqual(["post-5"]);
+    expect(p["deps"].store.recentLog().some((l) => l.detail.includes("ohne Musikbezug"))).toBe(true);
+  });
+
+  test("Postfach kennzeichnet den Entwurf, Vorschläge schicken ihn nicht per Benachrichtigung", async () => {
+    const p = pipeline();
+    // dreimal vorschlagen: jede offene Mail kommt einmal dran
+    for (let i = 0; i < 3; i++) await p.suggest();
+    expect(notified).toEqual(["Band X – Tour 2027", "Band Y – neues Album"]);
+    expect(notified).not.toContain("Gaming: Nebelwacht erscheint");
+    // nicht übersprungen – bleibt mit Entwurf und Kennzeichen im Postfach
+    expect(marks.some(([uid]) => uid === 5)).toBe(false);
+    const list = await p.listMails();
+    expect(list.find((m) => m.uid === 5)).toMatchObject({ hasDraft: true, noMusic: true });
+    expect(list.find((m) => m.uid === 3)?.noMusic).toBe(false);
+  });
+});
+
+test("eigenes Beitragsbild: landet im Entwurf und wird beim Veröffentlichen hochgeladen", async () => {
+  const p = pipeline();
+  const added: { id: string; filename: string; data: Buffer }[] = [];
+  const deps = p["deps"];
+  const collect = deps.images.collect;
+  const read = deps.images.read;
+  deps.images.add = async (_m, file) => {
+    const image = { id: "cccccccccccc", origin: "eigenes" as const, filename: file.filename, contentType: file.contentType, width: 800, height: 600, bytes: file.data.length };
+    added.push({ id: image.id, filename: file.filename, data: file.data });
+    return { images: { images: [image], downloadLinks: [], videos: [] }, image };
+  };
+  deps.images.read = async (m, id) => {
+    const own = added.find((a) => a.id === id);
+    return own ? { id, origin: "eigenes", filename: own.filename, contentType: "image/png", width: 800, height: 600, bytes: own.data.length, data: own.data } : read(m, id);
+  };
+  deps.images.collect = collect;
+
+  await p.preview(4);
+  const { article } = await p.addImage(4, { filename: "eigen.png", contentType: "image/png", data: Buffer.from("x") });
+  expect(article?.featured_image).toBe("cccccccccccc");
+  await p.publish(4);
+  expect(uploaded.at(-1)?.featured).toBe("eigen.png");
 });

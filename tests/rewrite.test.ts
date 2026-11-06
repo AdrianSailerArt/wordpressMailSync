@@ -40,9 +40,9 @@ test("erst Musik-Prüfung, dann Beitrag – Schema wird mitgeschickt, Ergebnis b
   expect(result.content_html).not.toContain("<script");
 });
 
-test("keine Musik (z. B. Technik-Pressemitteilung): kein Beitrag, nur ein Modellaufruf", async () => {
+test("keine News (z. B. Werbung): kein Beitrag, nur ein Modellaufruf", async () => {
   const spy = spyOn(globalThis, "fetch").mockResolvedValue(
-    reply(JSON.stringify({ artist: "", music_news: false, reason: "Bluetooth-Chip" })));
+    reply(JSON.stringify({ artist: "", news: false, music_news: false, reason: "Bluetooth-Chip" })));
   const result = await new Rewriter(cfg, ["News"]).rewrite({ ...mail, subject: "Nordic Semiconductor: Bluetooth" });
   expect(spy).toHaveBeenCalledTimes(1);
   expect(result.relevant).toBe(false);
@@ -52,6 +52,23 @@ test("keine Musik (z. B. Technik-Pressemitteilung): kein Beitrag, nur ein Modell
 test("Musik ohne benannten Künstler zählt nicht", async () => {
   spyOn(globalThis, "fetch").mockResolvedValue(reply(JSON.stringify({ artist: " ", music_news: true, reason: "Release" })));
   expect((await new Rewriter(cfg, ["News"]).rewrite(mail)).relevant).toBe(false);
+});
+
+test("News ohne Musikbezug (z. B. Gaming) wird geschrieben – mit Kennzeichen für die Warnung", async () => {
+  const gaming = JSON.stringify({ artist: "Nebelwacht", news: true, music_news: false, art: "sonstiges", reason: "Videospiel-Release" });
+  const spy = spyOn(globalThis, "fetch").mockResolvedValueOnce(reply(gaming)).mockResolvedValueOnce(reply(article));
+  const result = await new Rewriter(cfg, ["News"]).rewrite({ ...mail, subject: "Nebelwacht erscheint im Dezember" });
+  expect(spy).toHaveBeenCalledTimes(2);
+  expect(result).toMatchObject({ relevant: true, music: false, music_note: "Videospiel-Release" });
+  const write = body(spy, 1).messages[0].content as string;
+  expect(write).toContain("keine Musik-News");
+  expect(write).toContain("Thema: Nebelwacht");
+  expect(write).toContain("Erfinde keinen Musikbezug");
+});
+
+test("Musik-News bleibt ohne Kennzeichen", async () => {
+  spyOn(globalThis, "fetch").mockResolvedValueOnce(reply(music)).mockResolvedValueOnce(reply(article));
+  expect(await new Rewriter(cfg, ["News"]).rewrite(mail)).toMatchObject({ relevant: true, music: true, music_note: "" });
 });
 
 test("bei kaputtem JSON wird einmal neu versucht", async () => {

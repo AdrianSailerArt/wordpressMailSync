@@ -14,7 +14,7 @@ const props = defineProps<{
   categories: string[];
   busy: string;
 }>();
-const emit = defineEmits<{ save: [Article]; publish: [] }>();
+const emit = defineEmits<{ save: [Article]; publish: []; images: [MailImages] }>();
 
 type View = "preview" | "original" | "compare" | "trace" | "html";
 const views: { id: View; label: string }[] = [
@@ -80,13 +80,49 @@ const titleLen = computed(() => draft.value.title.length);
 const metaLen = computed(() => draft.value.meta_description.length);
 const seoLen = computed(() => draft.value.seo_title.length);
 
-/** Aktuelles Thumbnail: Auswahl im Entwurf, sonst automatisch das größte Bild */
+/** Aktuelles Thumbnail: Auswahl im Entwurf, sonst automatisch das größte Bild aus der Mail */
+const autoThumbnail = computed(() => props.images?.images.find((i) => i.origin !== "eigenes")?.id ?? null);
 const thumbnailId = computed(() =>
-  draft.value.featured_image === "none" ? null : draft.value.featured_image || props.images?.images[0]?.id || null);
+  draft.value.featured_image === "none" ? null : draft.value.featured_image || autoThumbnail.value);
 
 function setThumbnail(id: string | "none") {
-  // das automatisch gewählte größte Bild als "" speichern, damit es Standard bleibt
-  draft.value.featured_image = id === props.images?.images[0]?.id ? "" : id;
+  // immer ausdrücklich speichern – „automatisch“ hängt sonst an der Einstellung „Beitragsbild“
+  draft.value.featured_image = id;
+}
+
+// ---- eigenes Bild nachträglich hinzufügen (wird gleich Beitragsbild)
+const uploading = ref(false);
+const uploadError = ref("");
+const fileInput = ref<HTMLInputElement | null>(null);
+const dragging = ref(false);
+
+async function upload(files: FileList | null | undefined) {
+  const file = files?.[0];
+  if (!file) return;
+  uploading.value = true;
+  uploadError.value = "";
+  try {
+    const { images, image } = await api.uploadImage(props.uid, file);
+    emit("images", images);
+    setThumbnail(image.id);
+  } catch (e) {
+    uploadError.value = (e as Error).message;
+  } finally {
+    uploading.value = false;
+    if (fileInput.value) fileInput.value.value = "";
+  }
+}
+
+async function removeImage(id: string) {
+  if (!confirm("Dieses hochgeladene Bild entfernen?")) return;
+  try {
+    const { images } = await api.removeImage(props.uid, id);
+    emit("images", images);
+    if (draft.value.featured_image === id) draft.value.featured_image = "";
+    draft.value.inline_images = draft.value.inline_images.filter((i) => i !== id);
+  } catch (e) {
+    uploadError.value = (e as Error).message;
+  }
 }
 
 function toggleInline(id: string) {
@@ -112,7 +148,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
     <div class="alert alert-warn">
       <Icon name="alert" class="mt-0.5" />
       <div>
-        <p class="font-medium">Keine Musik-Pressemitteilung</p>
+        <p class="font-medium">Keine News für einen Beitrag</p>
         <p class="mt-0.5 opacity-80">{{ article.reason }}</p>
       </div>
     </div>
@@ -123,6 +159,18 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
   </div>
 
   <div v-else class="space-y-8">
+    <!-- News ohne Musikbezug: darf veröffentlicht werden, aber nicht aus Versehen -->
+    <div v-if="article.music === false" class="alert alert-warn" role="alert">
+      <Icon name="alert" class="mt-0.5" />
+      <div>
+        <p class="font-semibold">Kein Musikbezug</p>
+        <p class="mt-0.5">
+          Das ist keine Musik-News<template v-if="article.music_note"> – {{ article.music_note }}</template>.
+          Du kannst den Beitrag trotzdem veröffentlichen; vorher fragt Bühnenpost noch einmal nach.
+        </p>
+      </div>
+    </div>
+
     <!-- Titel & Kerndaten -->
     <section class="space-y-4">
       <div>
@@ -188,24 +236,46 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
       </div>
     </section>
 
-    <!-- Bilder -->
-    <section>
-      <div class="mb-3 flex items-center gap-2">
+    <!-- Bilder (auch per Drag & Drop: eigenes Bild als Beitragsbild) -->
+    <section
+      class="relative"
+      @dragover.prevent="dragging = true"
+      @dragleave.self="dragging = false"
+      @drop.prevent="dragging = false; upload($event.dataTransfer?.files)"
+    >
+      <div v-if="dragging" class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-brand-600 bg-white/85 text-sm font-semibold dark:bg-zinc-900/85">
+        Bild hier ablegen – wird Beitragsbild
+      </div>
+      <div class="mb-3 flex flex-wrap items-center gap-2">
         <Icon name="image" class="text-zinc-400" />
         <h3 class="text-sm font-semibold">Bilder</h3>
         <span v-if="images?.images.length" class="text-xs text-zinc-500">Klick = Beitragsbild · „+ Text“ = zusätzlich im Text</span>
+        <span class="ml-auto" />
+        <input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" @change="upload(($event.target as HTMLInputElement).files)" />
+        <button class="btn btn-sm" :disabled="uploading" title="Eigenes Bild hinzufügen (JPEG, PNG, WebP) – wird Beitragsbild. Auch per Drag & Drop." @click="fileInput?.click()">
+          <Icon :name="uploading ? 'refresh' : 'upload'" :size="13" :class="uploading && 'animate-spin'" />{{ uploading ? "lädt …" : "Bild hochladen" }}
+        </button>
         <button
           v-if="images?.images.length"
-          class="btn btn-sm ml-auto"
+          class="btn btn-sm"
           :class="thumbnailId === null && '!ring-brand-500 text-brand-700 dark:text-brand-300'"
           @click="setThumbnail(thumbnailId === null ? '' : 'none')"
         >
           <Icon v-if="thumbnailId === null" name="check" :size="13" />ohne Beitragsbild
         </button>
       </div>
+      <p v-if="uploadError" class="alert alert-error mb-3 text-xs"><Icon name="alert" :size="14" class="mt-0.5" />{{ uploadError }}</p>
 
       <div v-if="!images" class="grid grid-cols-3 gap-3 sm:grid-cols-5"><div v-for="n in 5" :key="n" class="skeleton aspect-square rounded-lg" /></div>
-      <p v-else-if="!images.images.length" class="text-sm text-zinc-500">Keine brauchbaren Bilder in der Mail gefunden.</p>
+      <button
+        v-else-if="!images.images.length"
+        class="empty w-full cursor-pointer py-8 hover:border-zinc-950 dark:hover:border-white"
+        :disabled="uploading"
+        @click="fileInput?.click()"
+      >
+        <Icon name="upload" :size="20" />
+        Keine brauchbaren Bilder in der Mail – eigenes Bild hochladen oder hierher ziehen.
+      </button>
       <div v-else class="grid grid-cols-3 gap-3 sm:grid-cols-4 xl:grid-cols-6">
         <figure v-for="img in images.images" :key="img.id" class="group relative">
           <button
@@ -225,7 +295,12 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
           >
             {{ draft.inline_images.includes(img.id) ? "✓ im Text" : "+ Text" }}
           </button>
-          <figcaption class="mt-1 truncate text-[11px] tabular-nums text-zinc-400">{{ img.width }}×{{ img.height }} · {{ img.origin }}</figcaption>
+          <figcaption class="mt-1 flex items-center gap-1 text-[11px] tabular-nums text-zinc-400">
+            <span class="truncate">{{ img.width }}×{{ img.height }} · {{ img.origin === "eigenes" ? "hochgeladen" : img.origin }}</span>
+            <button v-if="img.origin === 'eigenes'" class="ml-auto shrink-0 hover:text-brand-700 dark:hover:text-brand-300" title="Hochgeladenes Bild entfernen" @click="removeImage(img.id)">
+              <Icon name="trash" :size="12" />
+            </button>
+          </figcaption>
         </figure>
       </div>
 

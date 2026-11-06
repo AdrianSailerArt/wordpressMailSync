@@ -31,6 +31,9 @@ export interface Deps {
     collect(mail: PressMail): Promise<MailImages>;
     read(mail: Pick<PressMail, "messageId">, id: string): Promise<(ImageInfo & { data: Buffer }) | null>;
     videoThumbnail(video: VideoInfo): Promise<ImageAttachment | null>;
+    /** eigenes Bild hochladen / wieder entfernen (fehlt in manchen Tests) */
+    add?(mail: PressMail, file: ImageAttachment): Promise<{ images: MailImages; image: ImageInfo }>;
+    remove?(mail: PressMail, id: string): Promise<MailImages>;
   };
   notifier?: { notify(n: { title: string; body: string; url: string; tag: string }): Promise<void> };
   store: Store;
@@ -58,6 +61,8 @@ export interface MailSummary {
   images: number;
   prefilter: boolean;
   hasDraft: boolean;
+  /** Entwurf ohne Musikbezug (z. B. Gaming) – darf veröffentlicht werden, das Dashboard warnt */
+  noMusic: boolean;
   account: string;
   /** dieselbe Mail aus anderen Postfächern (oder doppelt im selben) */
   duplicates: DuplicateInfo[];
@@ -169,6 +174,7 @@ export class Pipeline {
       images: m.images.length + (m.imageUrls?.length ?? 0),
       prefilter: looksRelevant(m),
       hasDraft: drafts.has(m.uid),
+      noMusic: drafts.has(m.uid) && this.deps.store.getDraft(m.uid)?.music === false,
       account: m.account ?? "",
       duplicates: (this.dupes.get(m.uid) ?? []).map((d) => ({ uid: d.uid, account: d.account ?? "", sender: d.sender, subject: d.subject, date: d.date })),
     }));
@@ -196,6 +202,35 @@ export class Pipeline {
     return this.deps.images.collect(await this.mustGet(uid));
   }
 
+  /**
+   * Eigenes Bild hinzufügen. featured: gleich als Beitragsbild in den Entwurf übernehmen (falls es einen gibt).
+   * Gibt die neue Bildliste und den Entwurf zurück.
+   */
+  async addImage(uid: number, file: ImageAttachment, featured = true): Promise<{ images: MailImages; image: ImageInfo; article: Article | null }> {
+    const mail = await this.mustGet(uid);
+    if (!this.deps.images.add) throw new Error("Bilder hochladen ist hier nicht möglich");
+    const { images, image } = await this.deps.images.add(mail, file);
+    let article = this.deps.store.getDraft(uid);
+    if (article && featured) {
+      article = { ...article, featured_image: image.id };
+      this.deps.store.saveDraft(uid, article);
+    }
+    return { images, image, article };
+  }
+
+  /** Eigenes Bild entfernen – war es Beitrags- oder Textbild, fällt es aus dem Entwurf */
+  async removeImage(uid: number, id: string): Promise<{ images: MailImages; article: Article | null }> {
+    const mail = await this.mustGet(uid);
+    if (!this.deps.images.remove) throw new Error("Bilder entfernen ist hier nicht möglich");
+    const images = await this.deps.images.remove(mail, id);
+    let article = this.deps.store.getDraft(uid);
+    if (article && (article.featured_image === id || article.inline_images.includes(id))) {
+      article = { ...article, featured_image: article.featured_image === id ? "" : article.featured_image, inline_images: article.inline_images.filter((i) => i !== id) };
+      this.deps.store.saveDraft(uid, article);
+    }
+    return { images, article };
+  }
+
   async image(uid: number, id: string): Promise<(ImageInfo & { data: Buffer }) | null> {
     const messageId = this.keys.get(uid) ?? (await this.mustGet(uid)).messageId;
     return this.deps.images.read({ messageId }, id);
@@ -212,7 +247,8 @@ export class Pipeline {
   /** Beitragsbild und Bilder im Text gemäß Auswahl im Entwurf (Standard: größtes Bild als Thumbnail). */
   private async pickImages(mail: PressMail, article: Article): Promise<{ featured?: ImageAttachment; inline: ImageAttachment[] }> {
     const { images } = await this.deps.images.collect(mail);
-    const auto = this.cfg.wp.featuredImage ? images[0]?.id : undefined;
+    // automatisch = größtes Bild aus der Mail; eigene Uploads nur, wenn ausdrücklich gewählt
+    const auto = this.cfg.wp.featuredImage ? images.find((i) => i.origin !== "eigenes")?.id : undefined;
     const featuredId = article.featured_image === "none" ? undefined : article.featured_image || auto;
     const load = async (id: string) => {
       const img = await this.deps.images.read(mail, id);
@@ -264,7 +300,7 @@ export class Pipeline {
     const { featured, inline } = await this.pickImages(mail, article);
     const post = await this.deps.wordpress.createPost(article, featured, inline, await this.pickVideos(mail, article));
     await this.markMail(mail, DONE_FLAG);
-    this.log("published", article.title, mail.subject, post.link);
+    this.log("published", article.title, article.music === false ? `${mail.subject} · ohne Musikbezug` : mail.subject, post.link);
     return post;
   }
 
@@ -278,6 +314,7 @@ export class Pipeline {
       const article = await this.draftFor(mail);
       if (!article.relevant) throw new Error(`Claude hält die Mail nicht für relevant: ${article.reason}`);
       if (await this.deps.wordpress.slugExists(article.slug)) throw new Error(`Slug „${article.slug}“ existiert bereits`);
+      // ohne Musikbezug ist erlaubt – das Dashboard hat vorher gewarnt; im Verlauf vermerkt
       return this.publishMail(mail, article);
     });
   }
@@ -298,6 +335,11 @@ export class Pipeline {
           result.skipped++;
           await this.markMail(mail, SKIPPED_FLAG);
           this.log("skipped", mail.subject, `nicht relevant: ${article.reason}`);
+          continue;
+        }
+        // News ohne Musikbezug: Entwurf bleibt im Postfach (mit Warnung), aber kein Vorschlag per Benachrichtigung
+        if (article.music === false) {
+          result.skipped++;
           continue;
         }
         const { images } = await this.deps.images.collect(mail);

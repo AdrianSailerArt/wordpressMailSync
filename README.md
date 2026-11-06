@@ -40,8 +40,12 @@ Entwürfe vor.
 1. **Mails holen** – alle unbearbeiteten Mails der letzten Tage (Einstellungen → Mails), neueste
    zuerst. Der Gelesen-Status bleibt unverändert.
 2. **Vorfilter** – Mails ohne Musik-Stichworte werden ohne KI-Aufruf übersprungen.
-3. **Sprachmodell, Stufe 1** – strenge Prüfung „Geht es um konkrete Musiker, Bands oder
-   Festivals?“ (≈ 10 s). Technik-, Wirtschafts- und Startup-Meldungen fliegen hier raus.
+3. **Sprachmodell, Stufe 1** – kurze Prüfung (≈ 10 s): Ist es überhaupt eine News? Rechnungen, Werbung
+   und Newsletter ohne Neuigkeit fliegen raus. Und: Ist es eine **Musik-News**? Dafür reicht jede Neuigkeit
+   über Musik – Album oder Tourdaten braucht es nicht, auch Soundtracks zählen. News **ohne Musikbezug**
+   (z. B. Gaming) werden trotzdem geschrieben, aber gekennzeichnet: Etikett „kein Musikbezug“ im Postfach,
+   Warnung im Entwurf und eine Rückfrage beim Veröffentlichen. Automatische Vorschläge per
+   Benachrichtigung gibt es nur für Musik-News.
 4. **Sprachmodell, Stufe 2** – schreibt den Beitrag nach dem
    [Stil-Regelwerk](stil/regelwerk.md): Titel im Hausformat, SEO-Titel, Meta-Description,
    Fokus-Keyword, Zwischenüberschriften, Tourdaten, Kategorie und Tags (≈ 30–60 s).

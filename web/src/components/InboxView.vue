@@ -122,6 +122,7 @@ async function preview(refresh: boolean) {
   if (result && selected.value?.uid === uid) {
     article.value = result;
     selected.value.hasDraft = true;
+    selected.value.noMusic = result.relevant && result.music === false;
   }
 }
 
@@ -138,6 +139,10 @@ async function save(edited: Article) {
 async function publish() {
   if (!selected.value) return;
   const uid = selected.value.uid;
+  // News ohne Musikbezug: erlaubt, aber nur nach ausdrücklicher Bestätigung
+  if (article.value?.music === false && !confirm(
+    `Achtung: Dieser Beitrag hat keinen Musikbezug${article.value.music_note ? ` (${article.value.music_note})` : ""}.\n\nTrotzdem veröffentlichen?`,
+  )) return;
   const post = await act("publish", () => api.publish(uid));
   if (post) {
     removeSelected();
@@ -241,6 +246,7 @@ onMounted(load);
                 {{ m.subject || "(kein Betreff)" }}
               </span>
               <span v-if="m.hasDraft" class="badge badge-green mt-0.5 shrink-0" title="Entwurf vorhanden">Entwurf</span>
+              <span v-if="m.noMusic" class="badge badge-amber mt-0.5 shrink-0" title="Keine Musik-News – Veröffentlichen geht, aber mit Warnung">kein Musikbezug</span>
             </div>
             <div class="mt-1 flex gap-2 text-xs text-zinc-500">
               <span class="truncate">{{ m.sender.replace(/<.*>/, "").trim() || m.sender }}</span>
@@ -317,6 +323,7 @@ onMounted(load);
             :busy="busy"
             @save="save"
             @publish="publish"
+            @images="(r) => (images = r)"
           />
 
           <MailView v-else :uid="selected.uid" :original="original" />

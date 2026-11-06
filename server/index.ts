@@ -296,6 +296,15 @@ const api = new Hono()
     if (!img) return c.notFound();
     return c.body(new Uint8Array(img.data), 200, { "Content-Type": img.contentType, "Cache-Control": "private, max-age=86400" });
   })
+  // eigenes Bild hochladen (multipart, Feld „file“) – ?featured=0: nicht gleich als Beitragsbild
+  .post("/mails/:uid/images", async (c) => {
+    const form = await c.req.parseBody();
+    const file = form.file;
+    if (!(file instanceof File)) return c.json({ error: "Kein Bild übermittelt" }, 400);
+    const data = Buffer.from(await file.arrayBuffer());
+    return c.json(await pipeline.addImage(uid(c), { filename: file.name, contentType: file.type, data }, c.req.query("featured") !== "0"), 201);
+  })
+  .delete("/mails/:uid/images/:id", async (c) => c.json(await pipeline.removeImage(uid(c), c.req.param("id"))))
   .post("/mails/:uid/preview", async (c) => c.json(await pipeline.preview(uid(c), c.req.query("refresh") === "1")))
   .put("/mails/:uid/draft", async (c) => c.json(pipeline.saveDraft(uid(c), ArticleSchema.parse(await c.req.json()))))
   .post("/mails/:uid/publish", async (c) => c.json(await pipeline.publish(uid(c))))

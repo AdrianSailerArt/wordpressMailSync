@@ -1,6 +1,8 @@
 /** Demo-Modus (DEMO=1): Beispiel-Mails und ein simuliertes WordPress, kein Netzwerkzugriff. */
 
+import { createHash } from "node:crypto";
 import type { Store } from "./db.ts";
+import type { ImageInfo } from "./images.ts";
 import type { LlmEvents, LlmTrace } from "./llm-events.ts";
 import { mailId, type PressMail } from "./mail.ts";
 import type { Deps } from "./pipeline.ts";
@@ -32,12 +34,30 @@ const MAILS: PressMail[] = [
     body: "Mira Sol veröffentlicht am 14. November ihre neue Single „Glas“, die erste Auskopplung aus dem kommenden Album. Das Video feiert am selben Tag Premiere auf YouTube.",
   },
   {
+    uid: 104, messageId: "<demo-104@example>", account: "redaktion@example.com", subject: "PRESSEINFO: „Nebelwacht“ erscheint am 3. Dezember für PC und Konsole", sender: "Pixelhain Studios <press@pixelhain.example>", date: hoursAgo(26), images: [],
+    body: "Das Freiburger Indie-Studio Pixelhain veröffentlicht sein Erkundungsspiel „Nebelwacht“ am 3. Dezember für PC, PlayStation 5 und Xbox Series X|S. Eine spielbare Demo steht ab sofort auf Steam bereit.",
+  },
+  {
     uid: 103, messageId: "<demo-103@example>", account: "presse@example.com", subject: "Ihre Rechnung Nr. 2026-1188", sender: "Hosting GmbH <billing@hosting.example>", date: hoursAgo(30), images: [],
     body: "Sehr geehrter Kunde, anbei Ihre Rechnung für November.",
   },
 ];
 
 function fakeArticle(mail: PressMail): Article {
+  if (mail.uid === 104) {
+    return {
+      ...cleanArticle({
+        relevant: true, reason: "Demo", featured_image: "", inline_images: [], wp_categories: [], seo_title: "", generated_by: "demo",
+        title: "Nebelwacht: Freiburger Indie-Spiel erscheint am 3. Dezember", slug: "nebelwacht-release-3-dezember",
+        focus_keyword: "Nebelwacht Release", meta_description: "Das Freiburger Studio Pixelhain bringt „Nebelwacht“ am 3. Dezember auf PC und Konsole – die Demo gibt es schon jetzt auf Steam.",
+        excerpt: "Ein Erkundungsspiel aus Freiburg: „Nebelwacht“ erscheint am 3. Dezember.",
+        content_html: "<p>Das Freiburger Indie-Studio <strong>Pixelhain</strong> veröffentlicht „Nebelwacht“ am <strong>3. Dezember</strong> für PC, PlayStation 5 und Xbox Series X|S.</p><h2>Demo schon jetzt spielbar</h2><p>Wer nicht warten will, kann eine Demo bereits auf Steam ausprobieren.</p>",
+        category: "News", tags: ["Nebelwacht", "Pixelhain", "Gaming", "Freiburg"], image_credit: "", music: true, music_note: "",
+      }, ["News", "Events"]),
+      music: false,
+      music_note: "Videospiel-Release ohne Musikbezug",
+    };
+  }
   const tour = mail.uid === 101;
   return cleanArticle({
     relevant: true,
@@ -63,6 +83,8 @@ function fakeArticle(mail: PressMail): Article {
     category: "News",
     tags: tour ? ["Nordlicht Kollektiv", "Indie", "Tour 2027", "Hamburg", "Wien"] : ["Mira Sol", "Single", "Pop"],
     image_credit: tour ? "Jana Weiss" : "",
+    music: true,
+    music_note: "",
   }, ["News", "Events"]);
 }
 
@@ -119,6 +141,24 @@ export function demoDeps(store: Store, events?: LlmEvents): Deps {
         const uid = MAILS.find((m) => m.messageId === mail.messageId)?.uid ?? 0;
         return DEMO_IMAGES[uid]?.find((i) => i.id === id) ?? null;
       },
+      // eigene Bilder nur im Speicher – die Demo schreibt nichts auf die Platte
+      add: async (mail, file) => {
+        const id = createHash("sha1").update(file.data).digest("hex").slice(0, 12);
+        const list = (DEMO_IMAGES[mail.uid] ??= []);
+        const found = list.find((i) => i.id === id);
+        const image = found ?? { id, origin: "eigenes" as const, filename: file.filename, contentType: file.contentType, width: 1600, height: 900, bytes: file.data.length, data: file.data };
+        if (!found) list.unshift(image);
+        const { data: _, ...info } = image;
+        return { images: { images: list.map(({ data, ...i }) => i), downloadLinks: [], videos: [] }, image: info };
+      },
+      remove: async (mail, id) => {
+        const list = DEMO_IMAGES[mail.uid] ?? [];
+        const image = list.find((i) => i.id === id);
+        if (!image) throw new Error("Bild nicht gefunden");
+        if (image.origin !== "eigenes") throw new Error("Nur selbst hochgeladene Bilder lassen sich entfernen");
+        DEMO_IMAGES[mail.uid] = list.filter((i) => i.id !== id);
+        return { images: DEMO_IMAGES[mail.uid]!.map(({ data, ...i }) => i), downloadLinks: [], videos: [] };
+      },
     },
     store,
   };
@@ -130,7 +170,7 @@ function placeholder(id: string, w: number, h: number, from: string, to: string,
   return { id, origin: "verlinkt" as const, filename: `${id}.svg`, contentType: "image/svg+xml", width: w, height: h, bytes: svg.length, data: Buffer.from(svg) };
 }
 
-const DEMO_IMAGES: Record<number, ReturnType<typeof placeholder>[]> = {
+const DEMO_IMAGES: Record<number, (ImageInfo & { data: Buffer })[]> = {
   101: [
     placeholder("a1b2c3d4e5f6", 2400, 1600, "#1e3a8a", "#7c3aed", "Bandfoto"),
     placeholder("b2c3d4e5f6a1", 1500, 1500, "#0f172a", "#0891b2", "Albumcover"),
