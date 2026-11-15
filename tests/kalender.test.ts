@@ -85,7 +85,7 @@ describe("Ticketmaster", () => {
   test("Termin mit Preis", () => {
     expect(mapTicketmaster(tm, quellen.gebiet, quellen.ausschliessen)).toMatchObject({
       uid: "ticketmaster:Z1", date: "2026-11-17", time: "20:00", artists: ["Bob Dylan"], venue: "SICK-Arena",
-      city: "Freiburg", country: "DE", info: "Tickets ab 89,90\u00a0€", status: "",
+      city: "Freiburg", country: "DE", info: "Tickets ab 89,90\u00a0€", status: "", lat: 48.02, lon: 7.83,
     });
   });
 

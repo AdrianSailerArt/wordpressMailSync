@@ -182,6 +182,19 @@ Ticketmaster Discovery API ─────────────────�
    **Seitenleiste:** unter *Design → Widgets* das Widget „Konzertkalender“ hinzufügen (Anzahl, Zeitraum, Orte,
    Länder und Link „Alle Konzerte“ einstellbar) – oder überall kompakt per Shortcode:
    `[konzertkalender kompakt="ja" anzahl="8" link="/konzerte/"]`.
+   **Karte** (ohne API-Schlüssel): `[konzertkalender filter="ja" karte="ja"]` zeigt über der Liste eine Karte der
+   Locations mit derselben Auswahl (Monat, Suche, Ort), `karte="nur"` nur die Karte. Ein Punkt je Location mit der
+   Zahl der Konzerte, beim Anklicken (oder Tab + Enter) die Termine mit Link. Technik: Leaflet liegt im Plugin,
+   die Kacheln kommen von OpenStreetMap. Weil dabei die IP-Adresse der Besucher an OpenStreetMap geht, steht
+   zuerst ein Hinweis mit **„Karte laden“** da – erst danach wird etwas von außen geladen. „Karte künftig
+   automatisch laden“ merkt sich das im Browser (localStorage, kein Cookie); unter der Karte lässt es sich mit
+   „Automatisches Laden der Karte beenden“ zurücknehmen. Die Koordinaten sucht WordPress im Hintergrund bei
+   Nominatim (OpenStreetMap, höchstens eine Anfrage pro Sekunde, nur Location und Ort, keine Besucherdaten);
+   Ticketmaster liefert sie gleich mit. Unter *Konzerte → Karte*: Anbieter, Kachel-Adresse, Datenschutz-Links,
+   Zustimmung an/aus und eine Liste aller Orte, in der sich falsche Positionen korrigieren lassen.
+   In der eigenen **Datenschutzerklärung** OpenStreetMap als Kartenanbieter erwähnen. Ein Consent-Tool (Borlabs,
+   Complianz, Real Cookie Banner …) kann die Karte per `kkKarte.zustimmen()` oder dem Ereignis
+   `kk:karte-zustimmung` auf `document` freigeben.
 3. Optional einen kostenlosen Ticketmaster-Schlüssel holen ([developer.ticketmaster.com](https://developer.ticketmaster.com),
    „Consumer Key“) und unter *Einstellungen → API-Keys* eintragen. Ohne Schlüssel wird Ticketmaster übersprungen.
 4. Probelauf ohne Übertragen: `bun run kalender --dry-run` – einzelne Quellen: `bun run kalender --dry-run vaddi jazzhaus`.

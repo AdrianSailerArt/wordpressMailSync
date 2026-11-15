@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Konzertkalender
- * Description: Konzerttermine aus der Region (Freiburg, Karlsruhe, Schweiz) – werden über die REST-API befüllt und per Shortcode [konzertkalender] als Liste angezeigt.
- * Version: 0.5.0
+ * Description: Konzerttermine aus der Region (Freiburg, Karlsruhe, Schweiz) – werden über die REST-API befüllt und per Shortcode [konzertkalender] als Liste und Karte angezeigt.
+ * Version: 0.6.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Text Domain: konzertkalender
@@ -14,13 +14,18 @@
  *
  * Anzeige: Shortcode [konzertkalender] (volle Liste), [konzertkalender kompakt="ja" anzahl="8" link="/konzerte/"]
  * oder das Widget „Konzertkalender“ für die Seitenleiste (Design → Widgets).
+ * Karte (ohne API-Schlüssel, lädt erst nach Zustimmung): [konzertkalender karte="ja"] über der Liste,
+ * karte="nur" ohne Liste. Einstellungen und Koordinaten: Konzerte → Karte.
  *
  * Ein Termin: uid, date (YYYY-MM-DD), time (HH:MM, optional), artists [ … ], title, venue, city,
- * country (DE/CH/FR …), info (Freitext: Preis, Einlass, Support …), url, status (ausverkauft/verschoben/abgesagt).
+ * country (DE/CH/FR …), info (Freitext: Preis, Einlass, Support …), url, status (ausverkauft/verschoben/abgesagt),
+ * lat/lon (optional, Koordinaten der Location – sonst sucht das Plugin sie selbst).
  */
 
 if (!defined('ABSPATH')) exit;
 
+const KK_VERSION = '0.6.0';
+const KK_FILE = __FILE__;
 const KK_POST_TYPE = 'kk_event';
 const KK_FIELDS = ['uid', 'source', 'date', 'time', 'artists', 'venue', 'city', 'country', 'info', 'url', 'status'];
 
@@ -117,9 +122,11 @@ function kk_sync(WP_REST_Request $req) {
 
     $result = ['created' => 0, 'updated' => 0, 'locked' => 0, 'deleted' => 0, 'invalid' => 0];
     $seen = [];
+    $geo = kk_geo_all();
     foreach ($events as $raw) {
         $e = kk_clean($raw, $source);
         if (!$e) { $result['invalid']++; continue; }
+        if (isset($raw['lat'], $raw['lon'])) kk_geo_learn($geo, $e, $raw['lat'], $raw['lon']);
         $seen[$e['uid']] = true;
         $id = isset($existing[$e['uid']]) ? $existing[$e['uid']] : 0;
         if ($id && get_post_meta($id, 'kk_locked', true)) { $result['locked']++; continue; }
@@ -143,6 +150,8 @@ function kk_sync(WP_REST_Request $req) {
             $result['deleted']++;
         }
     }
+    kk_geo_save($geo);
+    kk_geo_schedule(); // Locations ohne Koordinaten im Hintergrund suchen
     return $result;
 }
 
@@ -314,9 +323,13 @@ function kk_keep_params() {
  * startet mit dem aktuellen Monat; kk_monat=alle zeigt alle Monate, eine Suche durchsucht das ganze Jahr.
  * kompakt="ja" anzahl="8" link="/konzerte/" – kurze Liste der nächsten Konzerte, z. B. für die Seitenleiste.
  * hinweis="…" eigener Haftungshinweis, hinweis="aus" blendet ihn aus.
+ * karte="ja" zeigt über der Liste eine Karte der Locations (dieselbe Auswahl), karte="nur" nur die Karte.
  */
 function kk_shortcode($atts) {
-    $atts = shortcode_atts(['tage' => 90, 'land' => '', 'ort' => '', 'location' => '', 'quelle' => '', 'limit' => 500, 'filter' => '', 'kompakt' => '', 'anzahl' => 8, 'link' => '', 'hinweis' => ''], $atts, 'konzertkalender');
+    $atts = shortcode_atts(['tage' => 90, 'land' => '', 'ort' => '', 'location' => '', 'quelle' => '', 'limit' => 500, 'filter' => '', 'kompakt' => '', 'anzahl' => 8, 'link' => '', 'hinweis' => '', 'karte' => ''], $atts, 'konzertkalender');
+    $karte = strtolower(trim((string) $atts['karte']));
+    $map_only = $karte === 'nur';
+    $show_map = $map_only || in_array($karte, ['1', 'ja', 'true', 'yes'], true);
     if (in_array(strtolower($atts['kompakt']), ['1', 'ja', 'true', 'yes'], true)) {
         return kk_render_compact(kk_query(array_merge($atts, ['limit' => $atts['anzahl']])), $atts['link'], $atts['hinweis']);
     }
@@ -381,8 +394,14 @@ function kk_shortcode($atts) {
             printf('<p class="kk-f-count">%d %s gefunden</p>', count($events), count($events) === 1 ? 'Konzert' : 'Konzerte');
         }
     }
+    if ($show_map && $events) echo kk_render_map($events, $map_only);
     if (!$events) {
         echo $filtered ? '<p class="kk-empty">Keine Konzerte für diese Auswahl.</p>' : '<p class="kk-empty">Zurzeit sind keine Konzerte eingetragen.</p>';
+        echo kk_hinweis($atts['hinweis']) . '</div>';
+        return ob_get_clean();
+    }
+
+    if ($map_only) {
         echo kk_hinweis($atts['hinweis']) . '</div>';
         return ob_get_clean();
     }
@@ -578,3 +597,5 @@ add_action('pre_get_posts', function ($q) {
         if (!$q->get('order')) $q->set('order', 'ASC');
     }
 });
+
+require_once __DIR__ . '/karte.php';

@@ -13,7 +13,7 @@
     "serve": "bun run server/index.ts",
     "once": "bun run server/cli.ts",
     "kalender": "bun run server/kalender-cli.ts",
-    "kalender:plugin": "cd wordpress && rm -f konzertkalender.zip && zip -r konzertkalender.zip konzertkalender",
+    "kalender:plugin": "mkdir -p wordpress/konzertkalender/vendor/leaflet && sed '/sourceMappingURL/d' node_modules/leaflet/dist/leaflet.js > wordpress/konzertkalender/vendor/leaflet/leaflet.js && cp node_modules/leaflet/dist/leaflet.css node_modules/leaflet/LICENSE wordpress/konzertkalender/vendor/leaflet/ && cd wordpress && rm -f konzertkalender.zip && zip -r konzertkalender.zip konzertkalender -x '*.DS_Store'",
     "typecheck": "tsc --noEmit -p . && vue-tsc --noEmit -p web",
     "test": "bun test"
   },
@@ -39,6 +39,7 @@
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-vue": "^6.0.10",
     "diff": "^9.0.0",
+    "leaflet": "1.9.4",
     "tailwindcss": "^4.3.4",
     "typescript": "~5.9.3",
     "vite": "^8.3.5",

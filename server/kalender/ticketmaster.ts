@@ -39,7 +39,7 @@ export function geohash(lat: number, lon: number, precision = 7): string {
   return hash;
 }
 
-export interface TmEvent {
+export type TmEvent = {
   id: string;
   name: string;
   url?: string;
@@ -49,20 +49,21 @@ export interface TmEvent {
     venues?: { name?: string; city?: { name?: string }; country?: { countryCode?: string }; location?: { latitude?: string; longitude?: string } }[];
     attractions?: { name?: string }[];
   };
-}
+};
 
 const STATUS: Record<string, string> = { cancelled: "Abgesagt", postponed: "Verschoben", rescheduled: "Neuer Termin" };
 
 // Parkplätze, VIP-Pakete und Gutscheine stehen bei Ticketmaster als eigene „Events“ drin
 const NOT_A_CONCERT = /\b(parken|parking|parkplatz|vip[- ]?(package|paket|upgrade)|upgrade|gutschein|voucher|shuttle)\b/i;
 
-export function mapTicketmaster(e: TmEvent, gebiet: Gebiet[], ausschliessen: string[]): KonzertEvent | null {
+export const mapTicketmaster = (e: TmEvent, gebiet: Gebiet[], ausschliessen: string[]): KonzertEvent | null => {
   const start = e.dates?.start;
   const venue = e._embedded?.venues?.[0];
   if (!start?.localDate || !venue || NOT_A_CONCERT.test(e.name) || isExcluded(e.name, ausschliessen)) return null;
   const lat = Number(venue.location?.latitude);
   const lon = Number(venue.location?.longitude);
   if (Number.isFinite(lat) && Number.isFinite(lon) && !inGebiet({ lat, lon }, gebiet)) return null;
+  const located = Number.isFinite(lat) && Number.isFinite(lon) && !(lat === 0 && lon === 0);
   const price = e.priceRanges?.find((p) => typeof p.min === "number");
   const fmt = (n: number) => new Intl.NumberFormat("de-DE", { style: "currency", currency: price?.currency || "EUR" }).format(n);
   const artists = (e._embedded?.attractions ?? []).map((a) => a.name?.trim() ?? "").filter(Boolean);
@@ -79,8 +80,9 @@ export function mapTicketmaster(e: TmEvent, gebiet: Gebiet[], ausschliessen: str
     info: price?.min ? `Tickets ab ${fmt(price.min)}` : "",
     url: e.url ?? "",
     status: STATUS[e.dates?.status?.code ?? ""] ?? "",
+    ...(located && { lat, lon }),
   };
-}
+};
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

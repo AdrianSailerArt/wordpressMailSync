@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 
 /** Ein Termin, wie ihn das WordPress-Plugin „Konzertkalender“ erwartet. */
-export interface KonzertEvent {
+export type KonzertEvent = {
   /** stabil je Quelle, damit ein Termin beim nächsten Abruf aktualisiert statt doppelt angelegt wird */
   uid: string;
   source: string;
@@ -20,7 +20,10 @@ export interface KonzertEvent {
   url: string;
   /** z. B. „Ausverkauft“, „Verschoben“, „Abgesagt“ */
   status: string;
-}
+  /** Koordinaten der Location, falls die Quelle sie liefert (Ticketmaster) – für die Karte im Plugin */
+  lat?: number;
+  lon?: number;
+};
 
 const Gebiet = z.object({ name: z.string(), lat: z.number(), lon: z.number(), radiusKm: z.number() });
 
