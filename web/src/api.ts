@@ -18,6 +18,8 @@ export interface Article {
   /** "" = automatisch (größtes Bild), "none" = kein Beitragsbild, sonst Bild-ID */
   featured_image: string;
   inline_images: string[];
+  /** Stelle je Bild im Text: Bild-ID → nach diesem Absatz (0 = ganz oben); fehlt = nach dem ersten */
+  inline_positions?: Record<string, number>;
   generated_by: string;
   /** fehlt = automatisch das erste Video, [] = keins, sonst gewählte YouTube-IDs */
   videos?: string[];
@@ -112,6 +114,25 @@ export interface MailImages {
   downloadLinks: { url: string; label: string }[];
   videos: VideoInfo[];
 }
+
+/** Bild aus der WordPress-Mediathek – im Entwurf als „wp:<id>“ gespeichert */
+export type WpMedia = {
+  id: number;
+  url: string;
+  thumb: string;
+  title: string;
+  alt: string;
+  caption: string;
+  filename: string;
+  width: number;
+  height: number;
+  date: string;
+  /** nur bei Vorschlägen: wie gut es passt und welche Begriffe getroffen haben */
+  score?: number;
+  matched?: string[];
+};
+
+export type MediaPage = { items: WpMedia[]; total: number; pages: number };
 
 export interface MailSummary {
   uid: number;
@@ -394,6 +415,9 @@ export const api = {
     if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
     return data as { images: MailImages; image: ImageInfo; article: Article | null };
   },
+  /** passende Bilder aus der Mediathek zum gespeicherten Entwurf; available=false: keine WordPress-Verbindung (Demo) */
+  mediaSuggestions: (uid: number) => call<{ items: WpMedia[]; selected: WpMedia[]; available: boolean }>("GET", `/mails/${uid}/media`),
+  searchMedia: (search: string, page = 1) => call<MediaPage>("GET", `/wp/media?search=${encodeURIComponent(search)}&page=${page}`),
   removeImage: (uid: number, id: string) => call<{ images: MailImages; article: Article | null }>("DELETE", `/mails/${uid}/images/${id}`),
   testPush: () => call<{ ok: true }>("POST", "/push/test"),
   models: (provider?: LlmProvider) => call<ModelsResponse>("GET", `/llm/models${provider ? `?provider=${provider}` : ""}`),

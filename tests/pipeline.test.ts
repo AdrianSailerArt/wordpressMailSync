@@ -4,6 +4,7 @@ import { Store } from "../server/db.ts";
 import { DONE_FLAG, SKIPPED_FLAG, type PressMail } from "../server/mail.ts";
 import { Pipeline } from "../server/pipeline.ts";
 import { ArticleSchema } from "../server/rewrite.ts";
+import type { PostImage } from "../server/wordpress.ts";
 
 const cfg = {
   wp: { categories: ["News"], featuredImage: true },
@@ -23,6 +24,7 @@ const MAILS = [
 let marks: [number, string][];
 let created: string[];
 let uploaded: { featured?: string; inline: string[] }[];
+let positions: number[][];
 let notified: string[];
 let postedVideos: string[][];
 let today: number;
@@ -32,6 +34,7 @@ function pipeline() {
   marks = [];
   created = [];
   uploaded = [];
+  positions = [];
   notified = [];
   postedVideos = [];
   rewrites = 0;
@@ -47,7 +50,9 @@ function pipeline() {
       slugExists: async () => false,
       createPost: async (a, featured, inline = [], videos = []) => {
         created.push(a.slug);
-        uploaded.push({ featured: featured?.filename, inline: inline.map((i) => i.filename) });
+        const name = (i: PostImage) => ("mediaId" in i ? `wp:${i.mediaId}` : i.filename);
+        uploaded.push({ featured: featured && name(featured), inline: inline.map((i) => name(i.image)) });
+        positions.push(inline.map((i) => i.after));
         postedVideos.push(videos.map((v) => v.video.id));
         return { id: 1, link: "https://wp/x" };
       },
@@ -142,6 +147,24 @@ test("Thumbnail und Bilder im Text gemäß Auswahl", async () => {
   p.saveDraft(4, { ...draft, featured_image: "bbbbbbbbbbbb", inline_images: ["aaaaaaaaaaaa"] });
   await p.publish(4);
   expect(uploaded[0]).toEqual({ featured: "klein.jpg", inline: ["gross.jpg"] });
+});
+
+test("Bilder aus der Mediathek werden verknüpft statt hochgeladen", async () => {
+  const p = pipeline();
+  const draft = await p.preview(4);
+  p.saveDraft(4, { ...draft, featured_image: "wp:42", inline_images: ["wp:7", "aaaaaaaaaaaa"] });
+  await p.publish(4);
+  expect(uploaded[0]).toEqual({ featured: "wp:42", inline: ["wp:7", "gross.jpg"] });
+});
+
+test("Bilder im Text an verschiedenen Stellen", async () => {
+  const p = pipeline();
+  const draft = await p.preview(4);
+  p.saveDraft(4, { ...draft, inline_images: ["aaaaaaaaaaaa", "wp:7"], inline_positions: { "wp:7": 3 } });
+  await p.publish(4);
+  expect(uploaded[0]!.inline).toEqual(["gross.jpg", "wp:7"]);
+  // ohne Angabe nach dem ersten Absatz
+  expect(positions[0]).toEqual([1, 3]);
 });
 
 test("„Kein Beitragsbild“ wird respektiert", async () => {

@@ -7,10 +7,10 @@ import type { ImageInfo, MailImages, VideoInfo } from "./images.ts";
 import { originalMail, renderMailHtml, type OriginalMail } from "./mail-view.ts";
 import { DONE_FLAG, SKIPPED_FLAG, looksRelevant, type ImageAttachment, type MailboxStatus, type PressMail } from "./mail.ts";
 import { CancelledError, cleanArticle, type Article } from "./rewrite.ts";
-import type { WpCategory } from "./wordpress.ts";
+import { mediaIdOf, type InlineImage, type PostImage, type WpCategory, type WpMedia } from "./wordpress.ts";
 
 /** Schnittstellen statt Klassen, damit die Tests Fakes einsetzen können. */
-export interface Deps {
+export type Deps = {
   mailbox: {
     candidates(done?: Set<string>): Promise<PressMail[]>;
     get(uid: number): Promise<PressMail | null>;
@@ -23,8 +23,12 @@ export interface Deps {
     /** Kategorien der Website fürs Dashboard (fehlt in der Demo) */
     categories?(): Promise<WpCategory[]>;
     createPost(
-      article: Article, featured?: ImageAttachment, inline?: ImageAttachment[], videos?: { video: VideoInfo; thumbnail: ImageAttachment | null }[],
+      article: Article, featured?: PostImage, inline?: InlineImage[], videos?: { video: VideoInfo; thumbnail: ImageAttachment | null }[],
     ): Promise<{ id: number; link: string }>;
+    /** Mediathek durchsuchen / passende Bilder finden / einzelnes Bild (fehlt in der Demo) */
+    searchMedia?(search?: string, page?: number): Promise<{ items: WpMedia[]; total: number; pages: number }>;
+    suggestMedia?(article: Pick<Article, "title" | "tags" | "focus_keyword">): Promise<WpMedia[]>;
+    media?(id: number): Promise<WpMedia | null>;
   };
   rewriter: { rewrite(mail: PressMail): Promise<Article>; cancel?(): boolean };
   images: {
@@ -37,22 +41,22 @@ export interface Deps {
   };
   notifier?: { notify(n: { title: string; body: string; url: string; tag: string }): Promise<void> };
   store: Store;
-}
+};
 
 /** Höchstens so viele Mails prüft ein Vorschlags-Lauf, bevor er aufgibt (lokale Modelle sind langsam). */
 const MAX_SUGGEST_ATTEMPTS = 5;
 /** So lange merkt sich das Tool erledigte Mails, um spätere Dubletten aus anderen Postfächern zu erkennen. */
 const FINGERPRINT_DAYS = 30;
 
-export interface DuplicateInfo {
+export type DuplicateInfo = {
   uid: number;
   account: string;
   sender: string;
   subject: string;
   date: string;
-}
+};
 
-export interface MailSummary {
+export type MailSummary = {
   uid: number;
   subject: string;
   sender: string;
@@ -66,20 +70,20 @@ export interface MailSummary {
   account: string;
   /** dieselbe Mail aus anderen Postfächern (oder doppelt im selben) */
   duplicates: DuplicateInfo[];
-}
+};
 
-export interface SuggestResult {
+export type SuggestResult = {
   suggested: { uid: number; title: string } | null;
   skipped: number;
   message: string;
-}
+};
 
 /** Testlauf: zeigt, welche Beiträge entstehen würden – veröffentlicht und markiert nichts. */
-export interface RunResult {
+export type RunResult = {
   skipped: number;
   previews: Article[];
   message: string;
-}
+};
 
 export class Pipeline {
   private queue: Promise<unknown> = Promise.resolve();
@@ -225,7 +229,8 @@ export class Pipeline {
     const images = await this.deps.images.remove(mail, id);
     let article = this.deps.store.getDraft(uid);
     if (article && (article.featured_image === id || article.inline_images.includes(id))) {
-      article = { ...article, featured_image: article.featured_image === id ? "" : article.featured_image, inline_images: article.inline_images.filter((i) => i !== id) };
+      const { [id]: _, ...positions } = article.inline_positions ?? {};
+      article = { ...article, featured_image: article.featured_image === id ? "" : article.featured_image, inline_images: article.inline_images.filter((i) => i !== id), inline_positions: positions };
       this.deps.store.saveDraft(uid, article);
     }
     return { images, article };
@@ -244,18 +249,48 @@ export class Pipeline {
     return Promise.all(chosen.map(async (video) => ({ video, thumbnail: await this.deps.images.videoThumbnail(video) })));
   }
 
+  /**
+   * Passende Bilder aus der WordPress-Mediathek für den Entwurf (nach Tags/Keyword) – plus die schon
+   * gewählten, damit das Dashboard sie zeigen kann, auch wenn sie nicht mehr zu den Treffern gehören.
+   */
+  async mediaSuggestions(uid: number): Promise<{ items: WpMedia[]; selected: WpMedia[]; available: boolean }> {
+    const wp = this.deps.wordpress;
+    if (!wp.suggestMedia) return { items: [], selected: [], available: false };
+    const article = this.deps.store.getDraft(uid);
+    if (!article) return { items: [], selected: [], available: true };
+    const items = await wp.suggestMedia(article);
+    const chosen = [article.featured_image, ...article.inline_images]
+      .map(mediaIdOf).filter((id): id is number => id !== null && !items.some((m) => m.id === id));
+    const selected = wp.media ? (await Promise.all([...new Set(chosen)].map((id) => wp.media!(id)))).filter((m): m is WpMedia => !!m) : [];
+    return { items, selected, available: true };
+  }
+
+  /** Freie Suche in der Mediathek */
+  async searchMedia(search: string, page = 1): Promise<{ items: WpMedia[]; total: number; pages: number }> {
+    if (!this.deps.wordpress.searchMedia) throw new Error("Mediathek ist hier nicht verfügbar");
+    return this.deps.wordpress.searchMedia(search, page);
+  }
+
   /** Beitragsbild und Bilder im Text gemäß Auswahl im Entwurf (Standard: größtes Bild als Thumbnail). */
-  private async pickImages(mail: PressMail, article: Article): Promise<{ featured?: ImageAttachment; inline: ImageAttachment[] }> {
+  private async pickImages(mail: PressMail, article: Article): Promise<{ featured?: PostImage; inline: InlineImage[] }> {
     const { images } = await this.deps.images.collect(mail);
     // automatisch = größtes Bild aus der Mail; eigene Uploads nur, wenn ausdrücklich gewählt
     const auto = this.cfg.wp.featuredImage ? images.find((i) => i.origin !== "eigenes")?.id : undefined;
     const featuredId = article.featured_image === "none" ? undefined : article.featured_image || auto;
-    const load = async (id: string) => {
+    const load = async (id: string): Promise<PostImage | undefined> => {
+      // aus der Mediathek: nur verknüpfen, nicht noch einmal hochladen
+      const mediaId = mediaIdOf(id);
+      if (mediaId !== null) return { mediaId };
       const img = await this.deps.images.read(mail, id);
       return img ? { filename: img.filename, contentType: img.contentType, data: img.data } : undefined;
     };
     const featured = featuredId ? await load(featuredId) : undefined;
-    const inline = (await Promise.all(article.inline_images.map(load))).filter((i): i is ImageAttachment => !!i);
+    // jedes Bild an seiner Stelle; ohne Angabe nach dem ersten Absatz (wie früher)
+    const positions = article.inline_positions ?? {};
+    const inline = (await Promise.all(article.inline_images.map(async (id) => {
+      const image = await load(id);
+      return image ? { image, after: positions[id] ?? 1 } : undefined;
+    }))).filter((i): i is InlineImage => !!i);
     return { featured, inline };
   }
 

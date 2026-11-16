@@ -140,6 +140,8 @@ export const ArticleSchema = z.object({
   // featured_image: "" = automatisch (größtes Bild), "none" = kein Beitragsbild, sonst Bild-ID
   featured_image: z.string().default(""),
   inline_images: z.array(z.string()).default([]),
+  // Stelle je Bild im Text: Bild-ID → nach diesem Absatz (0 = ganz oben); fehlt = nach dem ersten
+  inline_positions: z.record(z.string(), z.number().int().min(0)).default({}),
   // welches Modell den Entwurf geschrieben hat
   generated_by: z.string().default(""),
   // YouTube-Videos: fehlt = automatisch das erste Video der Mail, [] = keins, sonst gewählte IDs
@@ -153,7 +155,7 @@ export const ArticleSchema = z.object({
 export type Article = z.infer<typeof ArticleSchema>;
 
 const FIELDS = (Object.keys(ArticleSchema.shape) as (keyof Article)[])
-  .filter((k) => !["wp_categories", "featured_image", "inline_images", "generated_by", "videos", "music", "music_note"].includes(k));
+  .filter((k) => !["wp_categories", "featured_image", "inline_images", "inline_positions", "generated_by", "videos", "music", "music_note"].includes(k));
 const JSON_SCHEMA = {
   type: "object",
   properties: Object.fromEntries(

@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { ImageStore } from "../server/images.ts";
 import { extractImageLinks, looksRelevant, parseMessage, youtubeId, type PressMail } from "../server/mail.ts";
 import { ArticleSchema, cleanArticle, degender, isBlockedLink, keepMailLinks, slugify, stripBlockedUrls, stripPressLinks, tidyContent } from "../server/rewrite.ts";
-import { insertAfterParagraph, videoHtml } from "../server/wordpress.ts";
+import { insertAtParagraphs, paragraphSnippets } from "../shared/paragraphs.ts";
+import { insertAfterParagraph, mediaIdOf, mediaTerms, rankMedia, videoHtml, type WpMedia } from "../server/wordpress.ts";
 
 function rawMail(subject: string, html: string, image?: Buffer): Buffer {
   const boundary = "XYZ";
@@ -274,5 +275,50 @@ describe("Links und Videos", () => {
     expect(insertAfterParagraph("<p>a</p><p>b</p><p>c</p>", "X", 2)).toBe("<p>a</p><p>b</p>\nX\n<p>c</p>");
     expect(insertAfterParagraph("<p>a</p>", "X", 2)).toBe("<p>a</p>\nX\n");
     expect(insertAfterParagraph("ohne Absatz", "X", 2)).toBe("ohne Absatz\nX");
+  });
+});
+
+describe("Mediathek", () => {
+  const media = (id: number, title: string, extra: Partial<WpMedia> = {}): WpMedia =>
+    ({ id, url: `https://wp/${id}.jpg`, thumb: "", title, alt: "", caption: "", filename: `${id}.jpg`, width: 1, height: 1, date: "2026-01-01", ...extra });
+
+  test("Bild-IDs der Mediathek erkennen", () => {
+    expect(mediaIdOf("wp:123")).toBe(123);
+    expect(mediaIdOf("aaaaaaaaaaaa")).toBeNull();
+    expect(mediaIdOf("none")).toBeNull();
+  });
+
+  test("Suchbegriffe: Tags und Keyword, ohne Füllwörter und Dubletten", () => {
+    expect(mediaTerms({ title: "", tags: ["Rammstein", "Tour", "rammstein", "Neues Album"], focus_keyword: "Rammstein Tour 2027" }))
+      .toEqual(["Rammstein", "Neues Album", "Rammstein Tour 2027"]);
+  });
+
+  test("Treffer nach Übereinstimmung sortiert, Unpassendes fällt raus", () => {
+    const ranked = rankMedia([
+      media(1, "Konzert im Park"),
+      media(2, "Foto", { filename: "die-toten-hosen-live.jpg" }),
+      media(3, "Die Toten Hosen", { alt: "Campino von den Toten Hosen", date: "2025-01-01" }),
+      media(4, "Hosenträger"),
+    ], ["Die Toten Hosen", "Campino"], "Die Toten Hosen kündigen Tour an");
+    expect(ranked.map((m) => m.id)).toEqual([3, 2]);
+    expect(ranked[0]!.matched).toEqual(["Die Toten Hosen", "Campino"]);
+  });
+});
+
+describe("Einfügen an mehreren Stellen", () => {
+  const html = "<p>Eins</p><h2>Zwischen</h2><p>Zwei</p><p>Drei</p>";
+
+  test("mehrere Stellen, bezogen auf die ursprünglichen Absätze", () => {
+    expect(insertAtParagraphs(html, [{ after: 3, html: "C" }, { after: 1, html: "A" }, { after: 1, html: "B" }, { after: 0, html: "O" }]))
+      .toBe("O\n<p>Eins</p>\nA\nB\n<h2>Zwischen</h2><p>Zwei</p><p>Drei</p>\nC\n");
+  });
+
+  test("zu große Position landet hinter dem letzten Absatz", () => {
+    expect(insertAtParagraphs(html, [{ after: 9, html: "X" }])).toBe(`${html}\nX\n`);
+  });
+
+  test("Absatz-Ausschnitte für die Auswahl", () => {
+    expect(paragraphSnippets("<p>Hallo <strong>Welt</strong> &amp; mehr</p><p>Zweiter Absatz ist lang</p>", 12))
+      .toEqual(["Hallo Welt…", "Zweiter Abs…"]);
   });
 });

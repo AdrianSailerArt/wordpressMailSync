@@ -7,6 +7,7 @@ import type { LlmEvents, LlmTrace } from "./llm-events.ts";
 import { mailId, type PressMail } from "./mail.ts";
 import type { Deps } from "./pipeline.ts";
 import { cleanArticle, type Article } from "./rewrite.ts";
+import { mediaTerms, rankMedia, type WpMedia } from "./wordpress.ts";
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 
@@ -47,7 +48,7 @@ function fakeArticle(mail: PressMail): Article {
   if (mail.uid === 104) {
     return {
       ...cleanArticle({
-        relevant: true, reason: "Demo", featured_image: "", inline_images: [], wp_categories: [], seo_title: "", generated_by: "demo",
+        relevant: true, reason: "Demo", featured_image: "", inline_images: [], inline_positions: {}, wp_categories: [], seo_title: "", generated_by: "demo",
         title: "Nebelwacht: Freiburger Indie-Spiel erscheint am 3. Dezember", slug: "nebelwacht-release-3-dezember",
         focus_keyword: "Nebelwacht Release", meta_description: "Das Freiburger Studio Pixelhain bringt „Nebelwacht“ am 3. Dezember auf PC und Konsole – die Demo gibt es schon jetzt auf Steam.",
         excerpt: "Ein Erkundungsspiel aus Freiburg: „Nebelwacht“ erscheint am 3. Dezember.",
@@ -64,6 +65,7 @@ function fakeArticle(mail: PressMail): Article {
     reason: "Demo",
     featured_image: "",
     inline_images: [],
+    inline_positions: {},
     wp_categories: [],
     seo_title: "",
     generated_by: "demo",
@@ -92,7 +94,7 @@ function fakeArticle(mail: PressMail): Article {
 async function streamDemo(events: LlmEvents | undefined, onTrace: (t: LlmTrace) => void, mail: PressMail, article: Article) {
   const model = "demo";
   const check = JSON.stringify({ artist: article.relevant ? article.title.split(":")[0] : "", music_news: article.relevant, reason: article.reason });
-  const write = JSON.stringify(Object.fromEntries(Object.entries(article).filter(([k]) => !["featured_image", "inline_images", "generated_by"].includes(k))), null, 2);
+  const write = JSON.stringify(Object.fromEntries(Object.entries(article).filter(([k]) => !["featured_image", "inline_images", "inline_positions", "generated_by"].includes(k))), null, 2);
   for (const [stage, raw] of [["check", check], ["write", write]] as const) {
     if (stage === "write" && !article.relevant) break;
     events?.emit({ type: "start", uid: mail.uid, stage, model, system: "(Demo-Anweisung)", user: mail.body, at: new Date().toISOString() });
@@ -121,6 +123,14 @@ export function demoDeps(store: Store, events?: LlmEvents): Deps {
       postsToday: async () => postsToday,
       slugExists: async () => false,
       createPost: async (a) => ({ id: ++postsToday, link: `https://example.com/${a.slug}/` }),
+      // simulierte Mediathek mit früheren Fotos
+      searchMedia: async (search = "", page = 1) => {
+        const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+        const hits = DEMO_MEDIA.filter((m) => words.every((w) => `${m.title} ${m.alt} ${m.caption}`.toLowerCase().includes(w)));
+        return { items: hits.slice((page - 1) * 24, page * 24), total: hits.length, pages: Math.max(1, Math.ceil(hits.length / 24)) };
+      },
+      suggestMedia: async (a) => rankMedia(DEMO_MEDIA, mediaTerms(a), a.title).slice(0, 12),
+      media: async (id) => DEMO_MEDIA.find((m) => m.id === id) ?? null,
     },
     rewriter: {
       rewrite: async (mail) => {
@@ -185,3 +195,18 @@ export const DEMO_ENV: Record<string, string> = {
   WP_CATEGORIES: "News,Events", SITE_NAME: "Demo-Musikblog",
   DB_PATH: ":memory:",
 };
+
+/** Simulierte Mediathek: Platzhalter als data-URL */
+const demoMedia = (id: number, title: string, alt: string, from: string, to: string, date: string): WpMedia => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><text x="50%" y="50%" fill="#fff" font-family="sans-serif" font-size="34" text-anchor="middle" dominant-baseline="middle">${title}</text></svg>`;
+  const url = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+  return { id, url, thumb: url, title, alt, caption: "", filename: `${title.toLowerCase().replace(/\W+/g, "-")}.jpg`, width: 1800, height: 1200, date };
+};
+
+const DEMO_MEDIA: WpMedia[] = [
+  demoMedia(501, "Nordlicht Kollektiv live", "Nordlicht Kollektiv auf der Bühne im Gloria", "#0f766e", "#1e293b", "2026-05-02"),
+  demoMedia(502, "Nordlicht Kollektiv Bandfoto", "Die fünf Musiker von Nordlicht Kollektiv", "#334155", "#0ea5e9", "2025-11-20"),
+  demoMedia(503, "Mira Sol Portrait", "Mira Sol im Studio", "#be185d", "#f59e0b", "2026-08-14"),
+  demoMedia(504, "Festivalgelände Hamburg", "Publikum vor der Hauptbühne", "#4d7c0f", "#0f172a", "2026-07-01"),
+  demoMedia(505, "Pixelhain Studio", "Das Team von Pixelhain in Freiburg", "#7c3aed", "#111827", "2026-03-09"),
+];

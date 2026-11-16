@@ -4,6 +4,7 @@ import type { Config } from "./config.ts";
 import type { VideoInfo } from "./images.ts";
 import type { ImageAttachment } from "./mail.ts";
 import { slugify, type Article } from "./rewrite.ts";
+import { insertAtParagraphs, type ParagraphInsert } from "../shared/paragraphs.ts";
 
 const SEO_META_KEYS = {
   yoast: { title: "_yoast_wpseo_title", description: "_yoast_wpseo_metadesc", keyword: "_yoast_wpseo_focuskw" },
@@ -12,13 +13,63 @@ const SEO_META_KEYS = {
 
 const ALL_STATUSES = "publish,future,draft,pending";
 
-export interface WpCategory {
+export type WpCategory = {
   id: number;
   name: string;
   slug: string;
   parent: number;
   count: number;
-}
+};
+
+/** Bild aus der WordPress-Mediathek, wie es das Dashboard zeigt */
+export type WpMedia = {
+  id: number;
+  /** Originaldatei */
+  url: string;
+  /** kleine Vorschau (medium/thumbnail), sonst das Original */
+  thumb: string;
+  title: string;
+  alt: string;
+  caption: string;
+  filename: string;
+  width: number;
+  height: number;
+  date: string;
+  /** wie gut das Bild zum Beitrag passt (nur bei Vorschlägen) */
+  score?: number;
+  /** welche Begriffe gepasst haben */
+  matched?: string[];
+};
+
+/** Bild für den Beitrag: neu hochladen (aus der Mail) oder vorhandenes aus der Mediathek */
+export type PostImage = ImageAttachment | { mediaId: number };
+
+/** Bild im Text an einer bestimmten Stelle: after = nach diesem Absatz (0 = ganz oben) */
+export type InlineImage = { image: PostImage; after: number };
+
+/** Videos stehen nach dem zweiten Absatz */
+const VIDEO_AFTER = 2;
+
+export const isLibraryImage = (img: PostImage): img is { mediaId: number } => "mediaId" in img;
+
+/** Bild-IDs aus der Mediathek stehen im Entwurf als „wp:123“ – Mail-Bilder haben 12 Hex-Zeichen */
+export const MEDIA_PREFIX = "wp:";
+export const mediaIdOf = (id: string): number | null => {
+  const m = id.match(/^wp:(\d+)$/);
+  return m ? Number(m[1]) : null;
+};
+
+type RawMedia = {
+  id: number;
+  date: string;
+  source_url: string;
+  title?: { rendered?: string; raw?: string };
+  alt_text?: string;
+  caption?: { rendered?: string; raw?: string };
+  media_details?: { width?: number; height?: number; file?: string; sizes?: Record<string, { source_url: string; width: number }> };
+};
+
+const MEDIA_FIELDS = "id,date,source_url,title,alt_text,caption,media_details";
 
 /** Heutiges Datum in der Zeitzone, z. B. "2026-11-02". */
 export const localDate = (timezone: string, date = new Date()) =>
@@ -135,6 +186,43 @@ export class WordPress {
     return this.termId("categories", labelOrSlug);
   }
 
+  /** Bilder der Mediathek durchsuchen (Titel, Beschreibung, Bildunterschrift), neueste zuerst. */
+  async searchMedia(search = "", page = 1, perPage = 24): Promise<{ items: WpMedia[]; total: number; pages: number }> {
+    const query: Record<string, string | number> = { media_type: "image", per_page: perPage, page, _fields: MEDIA_FIELDS, orderby: "date", order: "desc" };
+    if (search.trim()) query.search = search.trim();
+    const res = await this.req("GET", "media", { query });
+    return {
+      items: ((await res.json()) as RawMedia[]).map(toMedia),
+      total: Number(res.headers.get("X-WP-Total") ?? 0),
+      pages: Number(res.headers.get("X-WP-TotalPages") ?? 1),
+    };
+  }
+
+  /** Einzelnes Bild der Mediathek, null wenn es nicht (mehr) existiert. */
+  async media(id: number): Promise<WpMedia | null> {
+    try {
+      return toMedia((await (await this.req("GET", `media/${id}`, { query: { _fields: MEDIA_FIELDS } })).json()) as RawMedia);
+    } catch (err) {
+      if (/: 404 /.test(String(err))) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * Passende Bilder zum Beitrag: sucht nach Tags (meist Band/Künstler), Fokus-Keyword und Titel,
+   * führt die Treffer zusammen und sortiert nach Übereinstimmung. Leer, wenn nichts passt.
+   */
+  async suggestMedia(article: Pick<Article, "title" | "tags" | "focus_keyword">, limit = 12): Promise<WpMedia[]> {
+    const terms = mediaTerms(article);
+    if (!terms.length) return [];
+    const found = new Map<number, WpMedia>();
+    const results = await Promise.allSettled(terms.map((t) => this.searchMedia(t, 1, 20)));
+    for (const r of results) if (r.status === "fulfilled") for (const m of r.value.items) found.set(m.id, m);
+    // war WordPress gar nicht erreichbar, den Fehler zeigen statt „keine Treffer“
+    if (results.every((r) => r.status === "rejected")) throw (results[0] as PromiseRejectedResult).reason;
+    return rankMedia([...found.values()], terms, article.title).slice(0, limit);
+  }
+
   private async uploadImage(image: ImageAttachment, alt: string, caption: string): Promise<{ id: number; url: string }> {
     const filename = image.filename.replace(/[^\w.-]+/g, "_");
     const res = await this.req("POST", "media", {
@@ -147,27 +235,27 @@ export class WordPress {
   }
 
   async createPost(
-    article: Article, featured?: ImageAttachment, inline: ImageAttachment[] = [],
+    article: Article, featured?: PostImage, inline: InlineImage[] = [],
     videos: { video: VideoInfo; thumbnail: ImageAttachment | null }[] = [],
   ): Promise<{ id: number; link: string }> {
     const caption = article.image_credit ? `Foto: ${article.image_credit}` : "";
-    let content = article.content_html;
-    if (videos.length) {
-      const blocks: string[] = [];
-      for (const { video, thumbnail } of videos) {
-        const media = thumbnail ? await this.uploadImage(thumbnail, `Video: ${video.title}`, "") : null;
-        blocks.push(videoHtml(video, media));
-      }
-      content = insertAfterParagraph(content, blocks.join("\n"), 2);
+    const inserts: ParagraphInsert[] = [];
+    for (const { video, thumbnail } of videos) {
+      const media = thumbnail ? await this.uploadImage(thumbnail, `Video: ${video.title}`, "") : null;
+      inserts.push({ after: VIDEO_AFTER, html: videoHtml(video, media) });
     }
-    if (inline.length) {
-      const figures: string[] = [];
-      for (const img of inline) {
-        const { id, url } = await this.uploadImage(img, article.title, caption);
-        figures.push(figureHtml(id, url, article.title, caption));
+    for (const { image, after } of inline) {
+      if (isLibraryImage(image)) {
+        // vorhandenes Bild: nicht neu hochladen, Alt-Text und Bildunterschrift aus der Mediathek
+        const media = await this.media(image.mediaId);
+        if (media) inserts.push({ after, html: figureHtml(media.id, media.url, media.alt || article.title, media.caption) });
+        continue;
       }
-      content = insertAfterFirstParagraph(content, figures.join("\n"));
+      const { id, url } = await this.uploadImage(image, article.title, caption);
+      inserts.push({ after, html: figureHtml(id, url, article.title, caption) });
     }
+    // alle Positionen beziehen sich auf die Absätze des Entwurfs, so wie im Dashboard gewählt
+    const content = insertAtParagraphs(article.content_html, inserts);
 
     const payload: Record<string, unknown> = {
       title: article.title,
@@ -187,7 +275,7 @@ export class WordPress {
         [keys.keyword]: article.focus_keyword,
       };
     }
-    if (featured) payload.featured_media = (await this.uploadImage(featured, article.title, caption)).id;
+    if (featured) payload.featured_media = isLibraryImage(featured) ? featured.mediaId : (await this.uploadImage(featured, article.title, caption)).id;
     return (await (await this.req("POST", "posts", { json: payload })).json()) as { id: number; link: string };
   }
 }
@@ -196,32 +284,79 @@ const decodeHtml = (s: string) => s.replace(/&amp;/g, "&").replace(/&#0?39;|&#82
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+const stripTags = (s: string) => decodeHtml(s.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+
+const toMedia = (m: RawMedia): WpMedia => {
+  const sizes = m.media_details?.sizes ?? {};
+  const thumb = sizes.medium_large ?? sizes.medium ?? sizes.thumbnail;
+  return {
+    id: m.id,
+    url: m.source_url,
+    thumb: thumb?.source_url ?? m.source_url,
+    title: stripTags(m.title?.rendered ?? m.title?.raw ?? ""),
+    alt: m.alt_text ?? "",
+    caption: stripTags(m.caption?.rendered ?? m.caption?.raw ?? ""),
+    filename: (m.media_details?.file ?? m.source_url).split("/").pop() ?? "",
+    width: m.media_details?.width ?? 0,
+    height: m.media_details?.height ?? 0,
+    date: m.date,
+  };
+};
+
+/** Vergleichbar machen: klein, ohne Akzente, Trennzeichen aus Dateinamen als Leerzeichen */
+const norm = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[-_.,:;!?/()"'„“”‚‘’]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** Wörter, nach denen allein zu suchen nichts bringt */
+const STOPWORDS = new Set(["neues", "neue", "neuer", "album", "single", "tour", "video", "news", "live", "konzert", "konzerte", "song", "ep", "der", "die", "das", "und", "mit", "von", "the", "and"]);
+
+/** Suchbegriffe für die Mediathek: Tags zuerst (meist Band/Künstler), dann Fokus-Keyword; höchstens 6. */
+export const mediaTerms = (article: Pick<Article, "title" | "tags" | "focus_keyword">): string[] => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of [...article.tags, article.focus_keyword]) {
+    const t = raw.trim();
+    const key = norm(t);
+    if (key.length < 3 || STOPWORDS.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out.slice(0, 6);
+};
+
+/**
+ * Treffer bewerten: Begriff kommt in Titel, Alt-Text, Bildunterschrift oder Dateiname vor.
+ * Längere Begriffe (Bandnamen aus mehreren Wörtern) zählen mehr; Treffer im Titel des Beitrags ebenso.
+ * Bilder ohne einen einzigen passenden Begriff fallen raus.
+ */
+export const rankMedia = (items: WpMedia[], terms: string[], title = ""): WpMedia[] => {
+  const titleNorm = norm(title);
+  return items
+    .map((m) => {
+      const hay = ` ${norm([m.title, m.alt, m.caption, m.filename].join(" "))} `;
+      const matched = terms.filter((t) => hay.includes(` ${norm(t)} `));
+      const score = matched.reduce((sum, t) => sum + norm(t).split(" ").length + (titleNorm.includes(norm(t)) ? 1 : 0), 0);
+      return { ...m, score, matched };
+    })
+    .filter((m) => m.score > 0)
+    .sort((a, b) => b.score - a.score || b.date.localeCompare(a.date));
+};
+
 /** Bild im Format des Block-Editors, damit WordPress es wie ein normal eingefügtes Bild behandelt. */
-export function figureHtml(id: number, url: string, alt: string, caption: string): string {
+export const figureHtml = (id: number, url: string, alt: string, caption: string): string => {
   const cap = caption ? `<figcaption class="wp-element-caption">${escapeHtml(caption)}</figcaption>` : "";
   return `<!-- wp:image {"id":${id},"sizeSlug":"large"} -->\n<figure class="wp-block-image size-large"><img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" class="wp-image-${id}"/>${cap}</figure>\n<!-- /wp:image -->`;
-}
-
-/** Bilder nach dem Einleitungsabsatz einfügen (oder ans Ende, wenn es keinen gibt). */
-export const insertAfterFirstParagraph = (html: string, insert: string) => insertAfterParagraph(html, insert, 1);
+};
 
 /** Nach dem n-ten Absatz einfügen; gibt es weniger Absätze, nach dem letzten bzw. ans Ende. */
-export function insertAfterParagraph(html: string, insert: string, n: number): string {
-  let i = -1;
-  for (let k = 0; k < n; k++) {
-    const next = html.indexOf("</p>", i + 1);
-    if (next === -1) break;
-    i = next;
-  }
-  return i === -1 ? `${html}\n${insert}` : `${html.slice(0, i + 4)}\n${insert}\n${html.slice(i + 4)}`;
-}
+export const insertAfterParagraph = (html: string, insert: string, n: number): string =>
+  insertAtParagraphs(html, [{ after: n, html: insert }]);
 
 /**
  * YouTube cookiefrei: eigenes Vorschaubild aus der Mediathek, verlinkt auf YouTube.
  * Beim Seitenaufruf wird nichts von Google geladen – kein Player, keine Cookies.
  * (Absichtlich keine nackte YouTube-URL: daraus würde Jetpack einen Player machen.)
  */
-export function videoHtml(video: VideoInfo, media: { id: number; url: string } | null): string {
+export const videoHtml = (video: VideoInfo, media: { id: number; url: string } | null): string => {
   const href = escapeHtml(video.url);
   const title = escapeHtml(video.title || "Video");
   const label = `▶ Video auf YouTube ansehen${video.title ? `: „${title}“` : ""}`;
@@ -230,4 +365,4 @@ export function videoHtml(video: VideoInfo, media: { id: number; url: string } |
     `<figure class="wp-block-image size-large video-preview"><a href="${href}" target="_blank" rel="noopener">` +
     `<img src="${escapeHtml(media.url)}" alt="Video: ${title}" class="wp-image-${media.id}"/></a>` +
     `<figcaption class="wp-element-caption"><a href="${href}" target="_blank" rel="noopener">${label}</a></figcaption></figure>\n<!-- /wp:image -->`;
-}
+};

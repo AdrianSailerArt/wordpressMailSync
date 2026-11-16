@@ -2,8 +2,13 @@
 import { computed, ref, toRaw, watch } from "vue";
 import { api, type Article, type MailImages, type OriginalMail, type WpCategories, type WpCategory } from "../api";
 import Icon from "./Icon.vue";
+import ImageTile from "./ImageTile.vue";
+import InlineImageList from "./InlineImageList.vue";
+import { insertAtParagraphs, paragraphSnippets } from "../../../shared/paragraphs";
+import { cachedMedia } from "../media-cache";
 import MailCompare from "./MailCompare.vue";
 import MailView from "./MailView.vue";
+import MediaLibrary from "./MediaLibrary.vue";
 import TraceView from "./TraceView.vue";
 
 const props = defineProps<{
@@ -58,10 +63,10 @@ const selectedCategories = computed<string[]>(() => {
   return wp.value?.categories.some((c) => c.slug === slug) ? [slug] : [];
 });
 
-function toggleCategory(slug: string) {
+const toggleCategory = (slug: string) => {
   const list = selectedCategories.value;
   draft.value.wp_categories = list.includes(slug) ? list.filter((s) => s !== slug) : [...list, slug];
-}
+};
 
 const categoryLabel = computed(() => {
   const list = wp.value?.categories ?? [];
@@ -85,10 +90,13 @@ const autoThumbnail = computed(() => props.images?.images.find((i) => i.origin !
 const thumbnailId = computed(() =>
   draft.value.featured_image === "none" ? null : draft.value.featured_image || autoThumbnail.value);
 
-function setThumbnail(id: string | "none") {
+const setThumbnail = (id: string | "none") => {
   // immer ausdrücklich speichern – „automatisch“ hängt sonst an der Einstellung „Beitragsbild“
   draft.value.featured_image = id;
-}
+};
+
+/** Mediathek neu befragen, sobald gespeicherte Tags oder Keyword sich ändern */
+const mediaKey = computed(() => `${props.article.tags.join("|")}#${props.article.focus_keyword}`);
 
 // ---- eigenes Bild nachträglich hinzufügen (wird gleich Beitragsbild)
 const uploading = ref(false);
@@ -96,7 +104,7 @@ const uploadError = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
 const dragging = ref(false);
 
-async function upload(files: FileList | null | undefined) {
+const upload = async (files: FileList | null | undefined) => {
   const file = files?.[0];
   if (!file) return;
   uploading.value = true;
@@ -111,32 +119,76 @@ async function upload(files: FileList | null | undefined) {
     uploading.value = false;
     if (fileInput.value) fileInput.value.value = "";
   }
-}
+};
 
-async function removeImage(id: string) {
+const removeImage = async (id: string) => {
   if (!confirm("Dieses hochgeladene Bild entfernen?")) return;
   try {
     const { images } = await api.removeImage(props.uid, id);
     emit("images", images);
     if (draft.value.featured_image === id) draft.value.featured_image = "";
-    draft.value.inline_images = draft.value.inline_images.filter((i) => i !== id);
+    removeInline(id);
   } catch (e) {
     uploadError.value = (e as Error).message;
   }
-}
+};
 
-function toggleInline(id: string) {
-  const list = draft.value.inline_images;
-  draft.value.inline_images = list.includes(id) ? list.filter((i) => i !== id) : [...list, id];
-}
+// ---- Bilder im Text: jedes an seiner Stelle („nach Absatz n“)
+const positions = computed(() => draft.value.inline_positions ?? {});
+
+const removeInline = (id: string) => {
+  draft.value.inline_images = draft.value.inline_images.filter((i) => i !== id);
+  const { [id]: _, ...rest } = positions.value;
+  draft.value.inline_positions = rest;
+};
+
+const moveInline = (id: string, after: number) => {
+  draft.value.inline_positions = { ...positions.value, [id]: after };
+};
+
+/** Neues Bild an die erste Stelle ab Absatz 1, an der noch keins steht – so verteilen sie sich */
+const freePosition = () => {
+  const count = paragraphSnippets(draft.value.content_html).length;
+  const taken = new Set(draft.value.inline_images.map((i) => positions.value[i] ?? 1));
+  for (let p = 1; p <= count; p++) if (!taken.has(p)) return p;
+  return Math.max(count, 1);
+};
+
+const toggleInline = (id: string) => {
+  if (draft.value.inline_images.includes(id)) return removeInline(id);
+  moveInline(id, freePosition());
+  draft.value.inline_images = [...draft.value.inline_images, id];
+};
+
+/** Mediathek-Bilder erst zeigen, wenn ihre Adresse bekannt ist (lädt die Mediathek nach) */
+const imageSrc = (id: string, large = false) => {
+  if (!id.startsWith("wp:")) return api.imageUrl(props.uid, id);
+  const media = cachedMedia(id);
+  return (large ? media?.url : media?.thumb) ?? "";
+};
+const imageLabel = (id: string) => {
+  const media = cachedMedia(id);
+  if (media) return `Mediathek: ${media.title || media.filename}`;
+  return props.images?.images.find((i) => i.id === id)?.filename ?? id;
+};
+
+const escapeAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+
+/** Vorschau mit den Textbildern an ihren Stellen (wie beim Veröffentlichen) */
+const previewHtml = computed(() => insertAtParagraphs(draft.value.content_html, draft.value.inline_images
+  .filter((id) => imageSrc(id, true))
+  .map((id) => ({
+    after: positions.value[id] ?? 1,
+    html: `<figure><img src="${escapeAttr(imageSrc(id, true))}" alt="${escapeAttr(imageLabel(id))}" /></figure>`,
+  }))));
 
 /** Gewählte Videos: ohne eigene Auswahl automatisch das erste Video der Mail */
 const selectedVideos = computed(() => draft.value.videos ?? props.images?.videos.slice(0, 1).map((v) => v.id) ?? []);
 
-function toggleVideo(id: string) {
+const toggleVideo = (id: string) => {
   const list = selectedVideos.value;
   draft.value.videos = list.includes(id) ? list.filter((v) => v !== id) : [...list, id];
-}
+};
 
 const kb = (bytes: number) => (bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round(bytes / 1e3)} KB`);
 
@@ -249,14 +301,14 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <Icon name="image" class="text-zinc-400" />
         <h3 class="text-sm font-semibold">Bilder</h3>
-        <span v-if="images?.images.length" class="text-xs text-zinc-500">Klick = Beitragsbild · „+ Text“ = zusätzlich im Text</span>
+        <span class="text-xs text-zinc-500">Klick = Beitragsbild · „+ Text“ = zusätzlich im Text, Stelle frei wählbar</span>
         <span class="ml-auto" />
         <input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" class="hidden" @change="upload(($event.target as HTMLInputElement).files)" />
         <button class="btn btn-sm" :disabled="uploading" title="Eigenes Bild hinzufügen (JPEG, PNG, WebP) – wird Beitragsbild. Auch per Drag & Drop." @click="fileInput?.click()">
           <Icon :name="uploading ? 'refresh' : 'upload'" :size="13" :class="uploading && 'animate-spin'" />{{ uploading ? "lädt …" : "Bild hochladen" }}
         </button>
         <button
-          v-if="images?.images.length"
+          v-if="images?.images.length || draft.featured_image.startsWith('wp:')"
           class="btn btn-sm"
           :class="thumbnailId === null && '!ring-brand-500 text-brand-700 dark:text-brand-300'"
           @click="setThumbnail(thumbnailId === null ? '' : 'none')"
@@ -277,32 +329,42 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
         Keine brauchbaren Bilder in der Mail – eigenes Bild hochladen oder hierher ziehen.
       </button>
       <div v-else class="grid grid-cols-3 gap-3 sm:grid-cols-4 xl:grid-cols-6">
-        <figure v-for="img in images.images" :key="img.id" class="group relative">
-          <button
-            class="block aspect-square w-full overflow-hidden rounded-lg bg-zinc-100 ring-offset-2 ring-offset-white transition dark:bg-zinc-800 dark:ring-offset-zinc-900"
-            :class="thumbnailId === img.id ? 'ring-2 ring-brand-600 dark:ring-brand-400' : 'opacity-85 ring-1 ring-zinc-950/40 hover:opacity-100 dark:ring-white/10'"
-            :title="`Als Beitragsbild verwenden – ${img.width}×${img.height}, ${kb(img.bytes)}`"
-            @click="setThumbnail(img.id)"
-          >
-            <img :src="api.imageUrl(uid, img.id)" :alt="img.filename" loading="lazy" class="size-full object-cover transition group-hover:scale-[1.03]" />
+        <ImageTile
+          v-for="img in images.images"
+          :key="img.id"
+          :src="api.imageUrl(uid, img.id)"
+          :alt="img.filename"
+          :title="`${img.width}×${img.height}, ${kb(img.bytes)}`"
+          :featured="thumbnailId === img.id"
+          :inline="draft.inline_images.includes(img.id)"
+          @select="setThumbnail(img.id)"
+          @toggle-inline="toggleInline(img.id)"
+        >
+          <span class="truncate">{{ img.width }}×{{ img.height }} · {{ img.origin === "eigenes" ? "hochgeladen" : img.origin }}</span>
+          <button v-if="img.origin === 'eigenes'" type="button" class="ml-auto shrink-0 hover:text-brand-700 dark:hover:text-brand-300" title="Hochgeladenes Bild entfernen" aria-label="Hochgeladenes Bild entfernen" @click="removeImage(img.id)">
+            <Icon name="trash" :size="12" />
           </button>
-          <span v-if="thumbnailId === img.id" class="absolute top-1.5 left-1.5 rounded-md bg-brand-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow">Beitragsbild</span>
-          <button
-            class="absolute top-1.5 right-1.5 rounded-md px-1.5 py-0.5 text-[10px] font-semibold shadow transition"
-            :class="draft.inline_images.includes(img.id) ? 'bg-emerald-600 text-white' : 'bg-white/90 text-zinc-700 opacity-0 group-hover:opacity-100 focus:opacity-100 dark:bg-zinc-900/90 dark:text-zinc-200'"
-            title="Zusätzlich im Text nach der Einleitung einfügen"
-            @click="toggleInline(img.id)"
-          >
-            {{ draft.inline_images.includes(img.id) ? "✓ im Text" : "+ Text" }}
-          </button>
-          <figcaption class="mt-1 flex items-center gap-1 text-[11px] tabular-nums text-zinc-400">
-            <span class="truncate">{{ img.width }}×{{ img.height }} · {{ img.origin === "eigenes" ? "hochgeladen" : img.origin }}</span>
-            <button v-if="img.origin === 'eigenes'" class="ml-auto shrink-0 hover:text-brand-700 dark:hover:text-brand-300" title="Hochgeladenes Bild entfernen" @click="removeImage(img.id)">
-              <Icon name="trash" :size="12" />
-            </button>
-          </figcaption>
-        </figure>
+        </ImageTile>
       </div>
+
+      <MediaLibrary
+        :uid="uid"
+        :saved-key="mediaKey"
+        :featured="thumbnailId"
+        :inline="draft.inline_images"
+        @select="setThumbnail"
+        @toggle-inline="toggleInline"
+      />
+
+      <InlineImageList
+        :ids="draft.inline_images"
+        :positions="positions"
+        :content-html="draft.content_html"
+        :src-of="imageSrc"
+        :label-of="imageLabel"
+        @move="moveInline"
+        @remove="removeInline"
+      />
 
       <div v-if="images?.videos.length" class="mt-6">
         <div class="label"><span>Videos</span><span class="font-normal text-zinc-400">cookiefrei: eigenes Vorschaubild mit Link zu YouTube</span></div>
@@ -349,7 +411,7 @@ const hint = (ok: boolean) => (ok ? "text-zinc-400 tabular-nums" : "text-amber-6
       <div class="p-4 sm:p-5">
         <article v-if="view === 'preview'" class="prose prose-zinc mx-auto max-w-3xl dark:prose-invert prose-headings:font-semibold prose-h2:text-lg prose-a:text-brand-700 dark:prose-a:text-brand-300">
           <h1 class="!text-2xl">{{ draft.title }}</h1>
-          <div v-html="draft.content_html" />
+          <div v-html="previewHtml" />
         </article>
 
         <template v-else-if="view === 'original' || view === 'compare'">

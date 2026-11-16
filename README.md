@@ -51,7 +51,11 @@ Entwürfe vor.
    Fokus-Keyword, Zwischenüberschriften, Tourdaten, Kategorie und Tags (≈ 30–60 s).
 5. **Bilder** – Anhänge, eingebettete und verlinkte Bilder der Mail werden gesammelt; Logos,
    Icons, Banner und Tracking-Pixel fliegen nach Größe raus. Das größte Bild wird Thumbnail,
-   im Dashboard lässt sich das ändern und weitere Bilder in den Text einfügen.
+   im Dashboard lässt sich das ändern und weitere Bilder in den Text einfügen – jedes an seiner
+   eigenen Stelle („ganz oben“ oder „nach Absatz n“), die Vorschau zeigt sie dort.
+   **Aus der WordPress-Mediathek** schlägt das Dashboard passende vorhandene Fotos vor (Suche nach
+   Tags und Fokus-Keyword, Treffer in Titel, Alt-Text, Bildunterschrift oder Dateiname); dazu gibt
+   es eine freie Suche. Gewählte Mediathek-Bilder werden nur verknüpft, nicht erneut hochgeladen.
    **YouTube-Videos** werden erkannt – auch hinter Klick-Zählern von Newsletter-Diensten – und
    **cookiefrei** eingebunden: eigenes Vorschaubild in der Mediathek, verlinkt auf YouTube. Beim
    Seitenaufruf wird nichts von Google geladen. Standard: das erste Video der Mail.

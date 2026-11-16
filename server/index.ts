@@ -234,6 +234,8 @@ const api = new Hono()
     });
   })
   .get("/wp/categories", async (c) => c.json(await pipeline.categories()))
+  // WordPress-Mediathek: freie Suche (?search=…&page=…)
+  .get("/wp/media", async (c) => c.json(await pipeline.searchMedia(c.req.query("search") ?? "", Math.max(1, Number(c.req.query("page")) || 1))))
   // Stil-Regelwerk: eigene Fassung bearbeiten, die Datei bleibt Vorlage
   .get("/regelwerk", (c) => c.json(wiring.regelwerk.state()))
   .put("/regelwerk", async (c) => c.json(wiring.regelwerk.save(((await c.req.json()) as { text: string }).text ?? "")))
@@ -291,6 +293,8 @@ const api = new Hono()
     });
   })
   .get("/mails/:uid/images", async (c) => c.json(await pipeline.images(uid(c))))
+  // passende Bilder aus der Mediathek zum gespeicherten Entwurf
+  .get("/mails/:uid/media", async (c) => c.json(await pipeline.mediaSuggestions(uid(c))))
   .get("/mails/:uid/images/:id", async (c) => {
     const img = await pipeline.image(uid(c), c.req.param("id"));
     if (!img) return c.notFound();
